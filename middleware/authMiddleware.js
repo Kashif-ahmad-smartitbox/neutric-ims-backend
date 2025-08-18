@@ -14,8 +14,7 @@ exports.protect = async (req, res, next) => {
         // Check if user account is blacklisted
         if (user.accountStatus === 'blacklisted') {
             return res.status(401).json({ message: 'Your account is blacklisted. Please contact support.' });
-        }
-
+        } 
         req.user = user;
         next();
     } catch (error) {
