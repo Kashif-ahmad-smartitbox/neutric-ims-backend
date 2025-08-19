@@ -38,9 +38,7 @@ app.use("/api/inventory", inventoryRoutes);
 app.use('/api/material-issue' ,materialIssueRoutes )
 
 
-app.use('/', (req, res )=>{
-    res.send(`Server Runiing on port ${ process.env.PORT }`)
-})
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
