@@ -59,16 +59,23 @@ router.get("/get-all-inventory", protect, async (req, res) => {
       query.siteId = req.user.site;
     }
 
-    const requests = await InventoryModel.find(query)
+    const SiteInventoryData = await siteInventoryModel.find(query)
       .populate({
         path: "itemId",
         select: "itemCode description uom category",
       })
       .sort({ createdAt: -1 });
 
+    // const requests = await InventoryModel.find(query)
+    //   .populate({
+    //     path: "itemId",
+    //     select: "itemCode description uom category",
+    //   })
+    //   .sort({ createdAt: -1 });
+
     res.status(200).json({
       success: true,
-      data: requests,
+      data: SiteInventoryData,
     });
   } catch (error) {
     res.status(500).json({

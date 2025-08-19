@@ -10,6 +10,7 @@ const supplierRoutes = require("./routes/supplierRoutes");
 const siteInventoryRoutes = require("./routes/siteInventoryRoutes");
 const marterilRequestRoutes = require("./routes/materialRequestRoute");
 const inventoryRoutes = require("./routes/inventoryRoutes");
+const materialIssueRoutes = require('./routes/materialIssueRoutes')
 // const PurchaseOrderPlanning = require('./routes/purchaseOrderPlanningRoutes'); // Import the PurchaseOrderPlanning model
 const cors = require("cors"); // Import the CORS package
 
@@ -34,6 +35,12 @@ app.use("/api/supplier", supplierRoutes);
 app.use("/api/site-inventory", siteInventoryRoutes);
 app.use("/api/material-request", marterilRequestRoutes);
 app.use("/api/inventory", inventoryRoutes);
+app.use('/api/material-issue' ,materialIssueRoutes )
+
+
+app.use('/', (req, res )=>{
+    res.send(`Server Runiing on port ${ process.env.PORT }`)
+})
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

@@ -39,7 +39,8 @@ const inventorySchema = new mongoose.Schema({
     ref: "Site",
     default: null,
   }
-});
+   
+}, { timestamps: true });
 
 inventorySchema.pre("save", async function (next) {
   if (this.isNew) {

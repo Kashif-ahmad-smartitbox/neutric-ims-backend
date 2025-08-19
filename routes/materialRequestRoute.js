@@ -2,34 +2,16 @@ const express = require("express");
 const mongoose = require("mongoose");
 const router = express.Router();
 const MaterialRequestModel = require("../models/MaterialRequest");
+const InventoryModel = require('../models/Inventotry')
+const siteInventoryModel = require('../models/SiteInventory')
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
-async function generateMaterialRequestNo() {
-  const lastRequest = await MaterialRequestModel.findOne().sort({
-    createdAt: -1,
-  });
-  let newNumber = 1;
-
-  if (lastRequest && lastRequest.materialRequestNo) {
-    const lastNum = parseInt(
-      lastRequest.materialRequestNo.replace("MR-", ""),
-      10
-    );
-    if (!isNaN(lastNum)) {
-      newNumber = lastNum + 1;
-    }
-  }
-  return `MR-${String(newNumber).padStart(4, "0")}`;
-}
 
 router.post("/create", protect, async (req, res) => {
   try {
-    let { materialRequestNo, siteId, items } = req.body;
+    let { siteId, items } = req.body;
 
-    if (!materialRequestNo) {
-      materialRequestNo = await generateMaterialRequestNo();
-    }
-
+    let materialRequestNo = await generateMaterialRequestNo();
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res
         .status(400)
@@ -44,7 +26,7 @@ router.post("/create", protect, async (req, res) => {
     const existingRequest = await MaterialRequestModel.findOne({
       siteId: siteId,
       status: "pending",
-      "items._id": { $in: items.map((i) => i._id) },
+      "items.itemId": { $in: items.map((i) => i.itemId) },
     });
 
     if (existingRequest) {
@@ -60,6 +42,44 @@ router.post("/create", protect, async (req, res) => {
       siteId,
       items,
     });
+
+    for (const item of items) {
+      const { _id: itemId, requestedQty } = item; 
+      await siteInventoryModel.findOneAndUpdate(
+        { itemId, siteId },
+        {
+          $inc: {
+            requestQuantity: requestedQty,
+          },
+          $setOnInsert: {
+            open: 0,
+            issuedQuantity: 0,
+            mip: 0,
+            inHand: 0,
+          },
+        },
+        { new: true, upsert: true }
+      );
+
+     let data =  await InventoryModel.findOneAndUpdate(
+        { itemId },
+        {
+          $inc: {
+            requestQuantity: requestedQty,
+          },
+          $setOnInsert: {
+            open: 0,
+            issuedQuantity: 0,
+            mip: 0,
+            inHand: 0,
+            siteId ,
+          },
+        },
+        { new: true, upsert: true }
+      )
+ 
+      console.log(data);
+    }
 
     res.status(201).json({
       success: true,
@@ -77,16 +97,21 @@ router.post("/create", protect, async (req, res) => {
 
 router.get("/get-all", protect, async (req, res) => {
   try {
-    let siteId = req.user.site
+    let siteId = req.user.site;
 
-    const requests = await MaterialRequestModel.find({siteId: new mongoose.Types.ObjectId(siteId)})
+  //   console.log(await req.user , '================');
+  // if(user.role === 'admin' || )
+
+    const requests = await MaterialRequestModel.find({
+      siteId: new mongoose.Types.ObjectId(siteId),
+    })
       .populate({
         path: "requestedBy",
         select: "name",
       })
       .populate({
-        path : "siteId",
-        select : "siteName"
+        path: "siteId",
+        select: "siteName",
       })
       .sort({ createdAt: -1 });
 
@@ -114,7 +139,7 @@ router.patch("/update/:id", async (req, res) => {
 
     const updatedRequest = await MaterialRequestModel.findByIdAndUpdate(
       id,
-      { requestedBy, siteId, items  , status  },
+      { requestedBy, siteId, items, status },
       { new: true, runValidators: true }
     );
 
@@ -161,5 +186,23 @@ router.delete("/delete", async (req, res) => {
     });
   }
 });
+
+async function generateMaterialRequestNo() {
+  const lastRequest = await MaterialRequestModel.findOne().sort({
+    createdAt: -1,
+  });
+  let newNumber = 1;
+
+  if (lastRequest && lastRequest.materialRequestNo) {
+    const lastNum = parseInt(
+      lastRequest.materialRequestNo.replace("MR-", ""),
+      10
+    );
+    if (!isNaN(lastNum)) {
+      newNumber = lastNum + 1;
+    }
+  }
+  return `MR-${String(newNumber).padStart(4, "0")}`;
+}
 
 module.exports = router;
