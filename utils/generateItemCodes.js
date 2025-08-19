@@ -13,7 +13,7 @@ async function generateItemCodes(count) {
 
   const codes = [];
   for (let i = start; i <= end; i++) {
-    codes.push(`ITM-${String(i).padStart(4, "0")}`);
+    codes.push(`ITEM-${String(i).padStart(4, "0")}`);
   }
 
   return codes;

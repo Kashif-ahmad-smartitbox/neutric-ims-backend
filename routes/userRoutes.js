@@ -12,7 +12,7 @@ const router = express.Router();
 
 // Generate JWT
 const generateToken = (id, role) => {
-  return jwt.sign({ id, role }, process.env.JWT_SECRET, { expiresIn: '15m' });
+  return jwt.sign({ id, role }, process.env.JWT_SECRET, { expiresIn: '1h' });
 };
 
 const generateRefreshToken = (id, role) => {
