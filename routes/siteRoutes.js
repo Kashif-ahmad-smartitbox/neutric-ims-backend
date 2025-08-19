@@ -5,7 +5,7 @@ const Site = require('../models/Site');
 const {protect, authorizeRoles} = require('../middleware/authMiddleware');
 
 // Get all sites
-router.get('/get-all-sites', async (req, res) => {
+router.get('/get-all-sites',protect, async (req, res) => {
   try {
     const sites = await Site.find();
     res.json({ success: true, sites });
@@ -15,9 +15,10 @@ router.get('/get-all-sites', async (req, res) => {
 });
 
 // Add multiple sites
-router.post('/add-sites', async (req, res) => {
+router.post('/add-sites',protect , async (req, res) => {
   try {
     const { sites } = req.body;
+    
     if (!sites || !Array.isArray(sites) || sites.length === 0) {
       return res.status(400).json({ success: false, message: 'Invalid sites data' });
     }
@@ -31,15 +32,14 @@ router.post('/add-sites', async (req, res) => {
     if (newSites.length === 0) {
       return res.status(400).json({ success: false, message: 'Central Ware House already exists' });
     }
-
     const savedSites = await Site.insertMany(newSites);
     res.json({ success: true, sites: savedSites });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error adding sites' });
+    console.error(error , '===========error')
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// Update a site
 router.put('/update-site/:id', protect, async (req, res) => {
   try {
     const { id } = req.params;

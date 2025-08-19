@@ -3,7 +3,7 @@ const router = express.Router();
 const Unit = require('../models/Unit');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
-// Get all units
+
 router.get('/get-all-units', async (req, res) => {
   try {
     const units = await Unit.find().sort({ createdAt: -1 });
@@ -13,22 +13,35 @@ router.get('/get-all-units', async (req, res) => {
   }
 });
 
-// Add units (single or bulk)
-router.post('/add-units', async (req, res) => {
+router.post("/add-units", async (req, res) => {
   try {
     const { units } = req.body;
     if (!units || !Array.isArray(units)) {
-      return res.status(400).json({ success: false, message: 'Invalid units data' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid units data" });
     }
 
-    const newUnits = await Unit.insertMany(units, { ordered: false });
-    res.json({ success: true, units: newUnits });
+    const chunkSize = 1000;
+    const chunks = chunkArray(units, chunkSize);
+
+    let insertedUnits = [];
+
+    for (const chunk of chunks) {
+      const inserted = await Unit.insertMany(chunk, { ordered: false });
+      insertedUnits = insertedUnits.concat(inserted);
+    }
+
+    res.json({
+      success: true,
+      totalInserted: insertedUnits.length,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Error inserting units:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// Update unit
 router.put('/update-unit/:id', async (req, res) => {
   try {
     const { unitName, unitDescription } = req.body;
@@ -46,7 +59,6 @@ router.put('/update-unit/:id', async (req, res) => {
   }
 });
 
-// Delete units
 router.post('/delete-units', async (req, res) => {
   try {
     const { unitIds } = req.body;
@@ -61,4 +73,12 @@ router.post('/delete-units', async (req, res) => {
   }
 });
 
+
+function chunkArray(array, size) {
+  const result = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+  return result;
+}
 module.exports = router;

@@ -21,7 +21,7 @@ const generateRefreshToken = (id, role) => {
   });
 };
 
-router.post('/add-user', async (req, res) => {
+router.post('/add-user',protect ,  async (req, res) => {
   const { name, email, mobile, username, password, role, site } = req.body;
   try {
     const userExists = await User.findOne({ $or: [{ email }, { username }] });

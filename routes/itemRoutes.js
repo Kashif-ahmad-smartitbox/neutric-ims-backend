@@ -4,8 +4,9 @@ const Item = require('../models/Item');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 const Category = require('../models/Category');
 const Unit = require('../models/Unit');
+const generateItemCodes = require("../utils/generateItemCodes");
 // Get all items
-router.get('/get-all-items', async (req, res) => {
+router.get('/get-all-items',protect , async (req, res) => {
   try {
     const items = await Item.find().sort({ createdAt: -1 });
     res.status(200).json({ success: true, items });
@@ -16,27 +17,41 @@ router.get('/get-all-items', async (req, res) => {
 });
 
 // Add items (single or bulk)
-router.post('/add-items', async (req, res) => {
+router.post("/add-items",protect , async (req, res) => {
   try {
     const { items } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ success: false, message: 'No items provided' });
+      return res
+        .status(400)
+        .json({ success: false, message: "No items provided" });
     }
+    const codes = await generateItemCodes(items.length);
+    const itemsWithCodes = items.map((item, idx) => ({
+      ...item,
+      itemCode: codes[idx],
+    }));
+    const newItems = await Item.insertMany(itemsWithCodes, { ordered: false });
+    const latestItem = await Item.findOne().sort({ itemCode: -1 });
 
-    const newItems = await Item.insertMany(items, { ordered: false });
-    res.status(201).json({ success: true, items: newItems });
+    res.status(201).json({
+      success: true,
+      items: newItems,
+      latestCode: latestItem?.itemCode || null,
+    });
   } catch (error) {
-    console.error('Error adding items:', error);
+    console.error("Error adding items:", error);
     if (error.code === 11000) {
-      res.status(400).json({ success: false, message: 'Duplicate item code found' });
+      res
+        .status(400)
+        .json({ success: false, message: "Duplicate item code found" });
     } else {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: "Server error" });
     }
   }
 });
 
-// Update an item
-router.put('/update-item/:id', async (req, res) => {
+
+router.put('/update-item/:id',protect, async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
@@ -61,8 +76,7 @@ router.put('/update-item/:id', async (req, res) => {
   }
 });
 
-// Delete items (single or multiple)
-router.post('/delete-items', async (req, res) => {
+router.post('/delete-items',protect , async (req, res) => {
   try {
     const { itemIds } = req.body;
     if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
@@ -81,7 +95,7 @@ router.post('/delete-items', async (req, res) => {
   }
 });
 
-// Get all categories
+
 router.get('/categories', async (req, res) => {
   try {
     const categories = await Category.find().sort({ createdAt: -1 });
@@ -102,5 +116,6 @@ router.get('/units', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
 
 module.exports = router;
