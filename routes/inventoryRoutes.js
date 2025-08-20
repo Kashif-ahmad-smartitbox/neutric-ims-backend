@@ -8,38 +8,56 @@ const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
 router.post("/add-opening-stock", protect, async (req, res) => {
   try {
-    const { itemId, open } = req.body;
-    const siteId = req.user.site;
-
-    const findItemInSite = await siteInventoryModel.findOne({ itemId, siteId });
-
-    if (findItemInSite) {
-      return res.status(400).json({
+    if (req.user.role === "admin") {
+      return res.status(403).json({
         success: false,
-        message: "This Item already present for this site",
+        message: "Admins are not allowed to perform this action.",
       });
     }
 
-    await siteInventoryModel.create({
-      itemId,
-      open,
-      inHand: open,
-      siteId,
-    });
+    const { stockData } = req.body; 
+    const siteId = req.user.site;
 
-   
-    const inventory = await InventoryModel.findOneAndUpdate(
-      { itemId },
-      { 
-        $inc: { open: open, inHand: open }
-      },
-      { new: true, upsert: true } 
-    );
+    if (!Array.isArray(stockData) || stockData.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide stockData as a non-empty array",
+      });
+    }
 
-    res.status(201).json({
+    let results = [];
+
+    for (let stock of stockData) {
+      const { itemId, open } = stock;
+
+      const siteInventory = await siteInventoryModel.findOneAndUpdate(
+        { itemId, siteId },
+        { 
+          $inc: { open: open, inHand: open },
+          $setOnInsert: { siteId, itemId } // set only when creating
+        },
+        { new: true, upsert: true }
+      );
+
+      await InventoryModel.findOneAndUpdate(
+        { itemId },
+        { 
+          $inc: { open: open, inHand: open },
+          $setOnInsert: { itemId } 
+        },
+        { new: true, upsert: true }
+      );
+
+      results.push({
+        itemId,
+        siteData: siteInventory
+      });
+    }
+
+    return res.status(201).json({
       success: true,
-      message: "Inventory created/updated successfully",
-      data: inventory,
+      message: "Stock data processed successfully",
+      results,
     });
   } catch (error) {
     console.error("Error creating/updating Inventory:", error);
@@ -150,5 +168,64 @@ router.get("/get-all-inventory", protect, async (req, res) => {
 //     });
 //   }
 // });
+
+
+router.get('/get-all-inHandTotal', async (req, res) => {
+  try {
+    const result = await siteInventoryModel.aggregate([
+      {
+        $lookup: {
+          from: "items",
+          localField: "itemId",
+          foreignField: "_id",
+          as: "itemData"
+        }
+      },
+      { $unwind: "$itemData" },
+      {
+        $lookup: {
+          from: "sites", 
+          localField: "siteId",
+          foreignField: "_id",
+          as: "siteData"
+        }
+      },
+      { $unwind: "$siteData" },
+      {
+        $group: {
+          _id: "$itemId",
+          itemCode: { $first: "$itemData.itemCode" },
+          description: { $first: "$itemData.description" },
+          uom: { $first: "$itemData.uom" },
+          category: { $first: "$itemData.category" },
+          sites: {
+            $push: {
+              siteId: "$siteId",
+              siteName: "$siteData.siteName",
+              qty: "$inHand"
+            }
+          },
+          totalQty: { $sum: "$inHand" }
+        }
+      },
+      { $sort: { itemCode: 1 } }
+    ]);
+
+    res.status(200).json({
+      status: true,
+      message: "In-Hand Totals fetched successfully",
+      data: result
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      status: false,
+      message: error.message
+    });
+  }
+});
+
+
+
 
 module.exports = router;
