@@ -2,14 +2,14 @@ const express = require("express");
 const mongoose = require("mongoose");
 const router = express.Router();
 const MaterialRequestModel = require("../models/MaterialRequest");
-const InventoryModel = require('../models/Inventotry')
-const siteInventoryModel = require('../models/SiteInventory')
+const InventoryModel = require("../models/Inventotry");
+const siteInventoryModel = require("../models/SiteInventory");
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
-
 
 router.post("/create", protect, async (req, res) => {
   try {
     let { siteId, items } = req.body;
+    let userId = req.user._id;
 
     let materialRequestNo = await generateMaterialRequestNo();
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -23,16 +23,66 @@ router.post("/create", protect, async (req, res) => {
       requestedQty: Number(item.requestedQty),
     }));
 
-    const existingRequest = await MaterialRequestModel.findOne({
-      siteId: siteId,
+    let existingRequest = await MaterialRequestModel.findOne({
+      requestedBy: userId,
       status: "pending",
-      "items.itemId": { $in: items.map((i) => i.itemId) },
     });
 
     if (existingRequest) {
-      return res.status(400).json({
-        success: false,
-        message: "Material request with the same site and item already exists",
+      for (const item of items) {
+        const existingItem = existingRequest.items.find(
+          (i) => i.itemId === item.itemId
+        );
+        if (existingItem) {
+          existingItem.requestedQty += item.requestedQty;
+        } else {
+          existingRequest.items.push(item);
+        }
+      }
+
+      await existingRequest.save();
+
+      for (const item of items) {
+        const { itemId, requestedQty } = item;
+
+        await siteInventoryModel.findOneAndUpdate(
+          { itemId, siteId },
+          {
+            $inc: {
+              requestQuantity: requestedQty,
+            },
+            $setOnInsert: {
+              open: 0,
+              issuedQuantity: 0,
+              mip: 0,
+              inHand: 0,
+            },
+          },
+          { new: true, upsert: true }
+        );
+
+        await InventoryModel.findOneAndUpdate(
+          { itemId },
+          {
+            $inc: {
+              requestQuantity: requestedQty,
+            },
+            $setOnInsert: {
+              open: 0,
+              issuedQuantity: 0,
+              mip: 0,
+              inHand: 0,
+              siteId,
+            },
+          },
+          { new: true, upsert: true }
+        );
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Material request updated successfully",
+        data: existingRequest,
       });
     }
 
@@ -44,7 +94,8 @@ router.post("/create", protect, async (req, res) => {
     });
 
     for (const item of items) {
-      const { _id: itemId, requestedQty } = item; 
+      const { itemId, requestedQty } = item;
+
       await siteInventoryModel.findOneAndUpdate(
         { itemId, siteId },
         {
@@ -61,7 +112,7 @@ router.post("/create", protect, async (req, res) => {
         { new: true, upsert: true }
       );
 
-     let data =  await InventoryModel.findOneAndUpdate(
+      await InventoryModel.findOneAndUpdate(
         { itemId },
         {
           $inc: {
@@ -72,13 +123,11 @@ router.post("/create", protect, async (req, res) => {
             issuedQuantity: 0,
             mip: 0,
             inHand: 0,
-            siteId ,
+            siteId,
           },
         },
         { new: true, upsert: true }
-      )
- 
-      console.log(data);
+      );
     }
 
     res.status(201).json({
@@ -99,9 +148,8 @@ router.get("/get-all", protect, async (req, res) => {
   try {
     let siteId = req.user.site;
 
-  //   console.log(await req.user , '================');
-  // if(user.role === 'admin' || )
-
+    //   console.log(await req.user , '================');
+    // if(user.role === 'admin' || )
     const requests = await MaterialRequestModel.find({
       siteId: new mongoose.Types.ObjectId(siteId),
     })
@@ -158,7 +206,7 @@ router.patch("/update/:id", async (req, res) => {
   }
 });
 
-router.delete("/delete", async (req, res) => {
+router.delete("/delete/:id", async (req, res) => {
   try {
     const { id } = req.params;
 

@@ -11,6 +11,8 @@ const siteInventoryRoutes = require("./routes/siteInventoryRoutes");
 const marterilRequestRoutes = require("./routes/materialRequestRoute");
 const inventoryRoutes = require("./routes/inventoryRoutes");
 const materialIssueRoutes = require('./routes/materialIssueRoutes')
+const purchaseOrderRoutes = require('./routes/purchaseOrder')
+const transferOrderRoutes = require('./routes/transferOrderRoutes')
 // const PurchaseOrderPlanning = require('./routes/purchaseOrderPlanningRoutes'); // Import the PurchaseOrderPlanning model
 const cors = require("cors"); // Import the CORS package
 
@@ -36,6 +38,8 @@ app.use("/api/site-inventory", siteInventoryRoutes);
 app.use("/api/material-request", marterilRequestRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use('/api/material-issue' ,materialIssueRoutes )
+app.use('/api/purchase-order' , purchaseOrderRoutes)
+app.use('/api/transfer-order' , transferOrderRoutes)
 
 
 
