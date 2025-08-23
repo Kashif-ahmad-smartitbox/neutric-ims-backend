@@ -14,6 +14,23 @@ router.get('/get-all-sites',protect, async (req, res) => {
   }
 });
 
+
+// Get  Single ites
+router.get('/get-sites/:id', protect , async (req, res) => {
+  try {
+    const sites = await Site.find({
+  $or: [
+    { hierarchy: "Central Ware House" },
+    { _id: req.params.id },              
+  ],
+});
+    res.json({ success: true, sites });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error fetching sites' });
+  }
+});
+
+
 // Add multiple sites
 router.post('/add-sites',protect , async (req, res) => {
   try {
