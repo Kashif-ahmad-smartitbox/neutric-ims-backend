@@ -151,7 +151,7 @@ router.post("/create", protect, async (req, res) => {
         { new: true, upsert: true }
       );
     }
-    
+
     res.status(201).json({
       success: true,
       message: "Material request created successfully",
@@ -170,6 +170,7 @@ router.get("/get-all", protect, async (req, res) => {
   try {
     let siteId = req.user.site;
     let userId = req.user._id;
+
     const requests = await MaterialRequestModel.find({
       requestedBy: new mongoose.Types.ObjectId(userId),
     })
@@ -181,9 +182,26 @@ router.get("/get-all", protect, async (req, res) => {
         path: "siteId",
         select: "siteName",
       })
+      .populate({
+        path: "items._id",
+        select: "itemCode description uom category gst",
+      })
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ success: true, data: requests });
+    const formattedRequests = requests.map((req) => ({
+      ...req.toObject(),
+      items: req.items.map((it) => ({
+        _id: it._id?._id, // actual item id
+        itemCode: it._id?.itemCode,
+        description: it._id?.description,
+        uom: it._id?.uom,
+        category: it._id?.category,
+        gst: it._id?.gst,
+        requestedQty: it.requestedQty,
+      })),
+    }));
+
+    res.status(200).json({ success: true, data: formattedRequests });
   } catch (error) {
     res.status(500).json({
       success: false,
