@@ -25,7 +25,7 @@ router.post("/add-items",protect , async (req, res) => {
         .status(400)
         .json({ success: false, message: "No items provided" });
     }
-    const newItems = await Item.insertMany(itemsWithCodes, { ordered: false });
+    const newItems = await Item.insertMany(items ,  { ordered: false });
     const latestItem = await Item.findOne().sort({ itemCode: -1 });
 
     res.status(201).json({
