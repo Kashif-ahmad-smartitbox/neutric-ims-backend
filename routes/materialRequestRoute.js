@@ -23,68 +23,68 @@ router.post("/create", protect, async (req, res) => {
       requestedQty: Number(item.requestedQty),
     }));
 
-    let existingRequest = await MaterialRequestModel.findOne({
-      requestedBy: userId,
-      status: "pending",
-    });
+    // let existingRequest = await MaterialRequestModel.findOne({
+    //   requestedBy: userId,
+    //   status: "pending",
+    // });
 
-    if (existingRequest) {
-      for (const item of items) {
-        const existingItem = existingRequest.items.find(
-          (i) => i.itemId === item.itemId
-        );
-        if (existingItem) {
-          existingItem.requestedQty += item.requestedQty;
-        } else {
-          existingRequest.items.push(item);
-        }
-      }
+    // if (existingRequest) {
+    //   for (const item of items) {
+    //     const existingItem = existingRequest.items.find(
+    //       (i) => i.itemId === item.itemId
+    //     );
+    //     if (existingItem) {
+    //       existingItem.requestedQty += item.requestedQty;
+    //     } else {
+    //       existingRequest.items.push(item);
+    //     }
+    //   }
 
-      await existingRequest.save();
+    //   await existingRequest.save();
 
-      for (const item of items) {
-        const { itemId, requestedQty } = item;
+    //   for (const item of items) {
+    //     const { itemId, requestedQty } = item;
 
-        await siteInventoryModel.findOneAndUpdate(
-          { itemId, siteId },
-          {
-            $inc: {
-              requestQuantity: requestedQty,
-            },
-            $setOnInsert: {
-              open: 0,
-              issuedQuantity: 0,
-              mip: 0,
-              inHand: 0,
-            },
-          },
-          { new: true, upsert: true }
-        );
+    //     await siteInventoryModel.findOneAndUpdate(
+    //       { itemId, siteId },
+    //       {
+    //         $inc: {
+    //           requestQuantity: requestedQty,
+    //         },
+    //         $setOnInsert: {
+    //           open: 0,
+    //           issuedQuantity: 0,
+    //           mip: 0,
+    //           inHand: 0,
+    //         },
+    //       },
+    //       { new: true, upsert: true }
+    //     );
 
-        await InventoryModel.findOneAndUpdate(
-          { itemId },
-          {
-            $inc: {
-              requestQuantity: requestedQty,
-            },
-            $setOnInsert: {
-              open: 0,
-              issuedQuantity: 0,
-              mip: 0,
-              inHand: 0,
-              siteId,
-            },
-          },
-          { new: true, upsert: true }
-        );
-      }
+    //     await InventoryModel.findOneAndUpdate(
+    //       { itemId },
+    //       {
+    //         $inc: {
+    //           requestQuantity: requestedQty,
+    //         },
+    //         $setOnInsert: {
+    //           open: 0,
+    //           issuedQuantity: 0,
+    //           mip: 0,
+    //           inHand: 0,
+    //           siteId,
+    //         },
+    //       },
+    //       { new: true, upsert: true }
+    //     );
+    //   }
 
-      return res.status(200).json({
-        success: true,
-        message: "Material request updated successfully",
-        data: existingRequest,
-      });
-    }
+    //   return res.status(200).json({
+    //     success: true,
+    //     message: "Material request updated successfully",
+    //     data: existingRequest,
+    //   });
+    // }
 
     const materialRequest = await MaterialRequestModel.create({
       materialRequestNo,
