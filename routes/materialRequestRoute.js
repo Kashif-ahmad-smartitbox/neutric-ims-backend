@@ -11,8 +11,7 @@ router.post("/create", protect, async (req, res) => {
   try {
     let { siteId, items } = req.body;
 
-    sitedId = req.user.site;
-    let userId = req.user._id;
+    siteId = req.user.site;
 
     let materialRequestNo = await generateMaterialRequestNo();
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -89,10 +88,30 @@ router.post("/create", protect, async (req, res) => {
     //   });
     // }
 
+    let requestedTo;
+    if (req.user.role === "junior site engineer") {
+      let user = await userModel.findOne({
+        site: req.user.site,
+        role: "site store incharge",
+      });
+      requestedTo = user._id;
+    } else if (req.user.role === "site store incharge") {
+      let user = await userModel.findOne({
+        role: "center store incharge",
+      });
+      requestedTo = user._id;
+    } else if (req.user.role === "center store incharge") {
+      let user = await userModel.findOne({
+        role: "purchase manager",
+      });
+      requestedTo = user._id;
+    }
+
     const materialRequest = await MaterialRequestModel.create({
       materialRequestNo,
       requestedBy: req.user.id,
       siteId,
+      requestedTo,
       items,
     });
 
@@ -132,7 +151,7 @@ router.post("/create", protect, async (req, res) => {
         { new: true, upsert: true }
       );
     }
-
+    
     res.status(201).json({
       success: true,
       message: "Material request created successfully",
@@ -150,8 +169,9 @@ router.post("/create", protect, async (req, res) => {
 router.get("/get-all", protect, async (req, res) => {
   try {
     let siteId = req.user.site;
+    let userId = req.user._id;
     const requests = await MaterialRequestModel.find({
-      siteId: new mongoose.Types.ObjectId(siteId),
+      requestedBy: new mongoose.Types.ObjectId(userId),
     })
       .populate({
         path: "requestedBy",
@@ -209,7 +229,6 @@ router.patch("/update/:id", async (req, res) => {
 router.delete("/delete/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res
         .status(400)
@@ -235,6 +254,30 @@ router.delete("/delete/:id", async (req, res) => {
   }
 });
 
+router.get("/get-all-approve", protect, async (req, res) => {
+  try {
+    const requests = await MaterialRequestModel.find({
+      requestedTo: new mongoose.Types.ObjectId(req.user._id),
+    })
+      .populate({
+        path: "requestedBy",
+        select: "name",
+      })
+      .populate({
+        path: "siteId",
+        select: "siteName",
+      })
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, data: requests });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+});
+
 async function generateMaterialRequestNo() {
   const lastRequest = await MaterialRequestModel.findOne().sort({
     createdAt: -1,
@@ -252,77 +295,5 @@ async function generateMaterialRequestNo() {
   }
   return `MR-${String(newNumber).padStart(4, "0")}`;
 }
-
-router.get("/get-all-approve", protect, async (req, res) => {
-  try {
-    let siteId = req.user.site;
-    if (req.user.role === "site store incharge") {
-      const requests = await MaterialRequestModel.find({
-        siteId: new mongoose.Types.ObjectId(siteId),
-      })
-        .populate({
-          path: "requestedBy",
-          select: "name",
-        })
-        .populate({
-          path: "siteId",
-          select: "siteName",
-        })
-        .sort({ createdAt: -1 });
-
-      res.status(200).json({ success: true, data: requests });
-    } else if (req.user.role === "center store incharge") {
-      try {
-        let allSiteStoreIncharge = await UserModel.find({
-          role: "site store incharge",
-        });
-        let siteIds = allSiteStoreIncharge.map((u) => u.siteId);
-        let requests = await MaterialRequestModel.find({
-          siteId: { $in: siteIds },
-        })
-          .populate({
-            path: "requestedBy",
-            select: "name",
-          })
-          .populate({
-            path: "siteId",
-            select: "siteName",
-          })
-          .sort({ createdAt: -1 });
-
-        res.status(200).json({ success: true, data: requests });
-      } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-      }
-    } else if (req.user.role === "purchase manager") {
-      try {
-        let cneterStoreIncharge = await UserModel.find({
-          role: "center store incharge",
-        });
-
-        const requests = await MaterialRequestModel.find({
-          siteId: new mongoose.Types.ObjectId(cneterStoreIncharge.site),
-        })
-          .populate({
-            path: "requestedBy",
-            select: "name",
-          })
-          .populate({
-            path: "siteId",
-            select: "siteName",
-          })
-          .sort({ createdAt: -1 });
-        res.status(200).json({ success: true, data: requests });
-      } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-      }
-    }
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message || "Internal server error",
-    });
-  }
-});
 
 module.exports = router;
