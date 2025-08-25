@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const router = express.Router();
 const MaterialRequestModel = require("../models/MaterialRequest");
+const userModel = require("../models/User");
 const InventoryModel = require("../models/Inventotry");
 const siteInventoryModel = require("../models/SiteInventory");
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
@@ -9,6 +10,8 @@ const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 router.post("/create", protect, async (req, res) => {
   try {
     let { siteId, items } = req.body;
+
+    sitedId = req.user.site;
     let userId = req.user._id;
 
     let materialRequestNo = await generateMaterialRequestNo();
@@ -147,9 +150,6 @@ router.post("/create", protect, async (req, res) => {
 router.get("/get-all", protect, async (req, res) => {
   try {
     let siteId = req.user.site;
-
-    //   console.log(await req.user , '================');
-    // if(user.role === 'admin' || )
     const requests = await MaterialRequestModel.find({
       siteId: new mongoose.Types.ObjectId(siteId),
     })
@@ -252,5 +252,77 @@ async function generateMaterialRequestNo() {
   }
   return `MR-${String(newNumber).padStart(4, "0")}`;
 }
+
+router.get("/get-all-approve", protect, async (req, res) => {
+  try {
+    let siteId = req.user.site;
+    if (req.user.role === "site store incharge") {
+      const requests = await MaterialRequestModel.find({
+        siteId: new mongoose.Types.ObjectId(siteId),
+      })
+        .populate({
+          path: "requestedBy",
+          select: "name",
+        })
+        .populate({
+          path: "siteId",
+          select: "siteName",
+        })
+        .sort({ createdAt: -1 });
+
+      res.status(200).json({ success: true, data: requests });
+    } else if (req.user.role === "center store incharge") {
+      try {
+        let allSiteStoreIncharge = await UserModel.find({
+          role: "site store incharge",
+        });
+        let siteIds = allSiteStoreIncharge.map((u) => u.siteId);
+        let requests = await MaterialRequestModel.find({
+          siteId: { $in: siteIds },
+        })
+          .populate({
+            path: "requestedBy",
+            select: "name",
+          })
+          .populate({
+            path: "siteId",
+            select: "siteName",
+          })
+          .sort({ createdAt: -1 });
+
+        res.status(200).json({ success: true, data: requests });
+      } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+      }
+    } else if (req.user.role === "purchase manager") {
+      try {
+        let cneterStoreIncharge = await UserModel.find({
+          role: "center store incharge",
+        });
+
+        const requests = await MaterialRequestModel.find({
+          siteId: new mongoose.Types.ObjectId(cneterStoreIncharge.site),
+        })
+          .populate({
+            path: "requestedBy",
+            select: "name",
+          })
+          .populate({
+            path: "siteId",
+            select: "siteName",
+          })
+          .sort({ createdAt: -1 });
+        res.status(200).json({ success: true, data: requests });
+      } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+      }
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+});
 
 module.exports = router;
