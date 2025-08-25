@@ -25,11 +25,6 @@ router.post("/add-items",protect , async (req, res) => {
         .status(400)
         .json({ success: false, message: "No items provided" });
     }
-    const codes = await generateItemCodes(items.length);
-    const itemsWithCodes = items.map((item, idx) => ({
-      ...item,
-      itemCode: codes[idx],
-    }));
     const newItems = await Item.insertMany(itemsWithCodes, { ordered: false });
     const latestItem = await Item.findOne().sort({ itemCode: -1 });
 
