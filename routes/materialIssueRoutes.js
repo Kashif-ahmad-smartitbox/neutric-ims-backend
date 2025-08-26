@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const MaterialIssueModel = require("../models/MaterialIssue");
 const MaterialRequestModel = require("../models/MaterialRequest");
+const SiteInventoryModel = require("../models/SiteInventory")
 const ItemModel = require("../models/Item")
 const { protect } = require("../middleware/authMiddleware");
 const mongoose = require("mongoose");
