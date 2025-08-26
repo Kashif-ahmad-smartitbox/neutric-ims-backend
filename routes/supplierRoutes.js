@@ -12,27 +12,27 @@ router.post("/add-suppliers",protect , async (req, res) => {
         message: "Suppliers array is required and cannot be empty.",
       });
     }
-    const emails = suppliers.map((s) => s.email.toLowerCase());
-    const existingSuppliers = await supplierModel.find({
-      email: { $in: emails },
-    });
+    // const emails = suppliers.map((s) => s.email.toLowerCase());
+    // const existingSuppliers = await supplierModel.find({
+    //   email: { $in: emails },
+    // });
 
-    if (existingSuppliers.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Duplicate email(s) found: ${existingSuppliers
-          .map((s) => s.email)
-          .join(", ")}`,
-      });
-    }
+    // if (existingSuppliers.length > 0) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: `Duplicate email(s) found: ${existingSuppliers
+    //       .map((s) => s.email)
+    //       .join(", ")}`,
+    //   });
+    // }
 
-    const uniqueEmails = new Set(emails);
-    if (uniqueEmails.size !== emails.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Duplicate email(s) in request payload.",
-      });
-    }
+    // const uniqueEmails = new Set(emails);
+    // if (uniqueEmails.size !== emails.length) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Duplicate email(s) in request payload.",
+    //   });
+    // }
     const insertedSuppliers = await supplierModel.insertMany(suppliers);
     res.status(201).json({
       success: true,
@@ -60,15 +60,15 @@ router.get("/get-all-suppliers",protect, async (req, res) => {
 router.put("/update-supplier/:id",protect, async (req, res) => {
   try {
     const { email } = req.body;
-    const existing = await supplierModel.findOne({
-      email,
-      _id: { $ne: req.params.id },
-    });
-    if (existing) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Email already in use" });
-    }
+    // const existing = await supplierModel.findOne({
+    //   email,
+    //   _id: { $ne: req.params.id },
+    // });
+    // if (existing) {
+    //   return res
+    //     .status(400)
+    //     .json({ success: false, message: "Email already in use" });
+    // }
     const updated = await supplierModel.findByIdAndUpdate(
       req.params.id,
       req.body,

@@ -1,6 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const MaterialIssueModel = require("../models/MaterialIssue");
+const MaterialRequestModel = require("../models/MaterialRequest");
+const ItemModel = require("../models/Item")
 const { protect } = require("../middleware/authMiddleware");
 const mongoose = require("mongoose");
 
@@ -90,6 +92,73 @@ router.get("/get-all-issue", protect, async (req, res) => {
       success: false,
       message: "Server error",
       error: error.message,
+    });
+  }
+});
+
+router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
+  try {
+    let userId = req.user._id;
+    let siteId = req.user.site;
+
+    // get all approved materialRequests for given site
+    let materialRequests = await MaterialRequestModel.find({
+      requestedTo: userId,
+      siteId: req.params.id,
+      status: "approved",
+    });
+
+    let responseData = [];
+
+    for (const material of materialRequests) {
+      for (const item of material.items) {
+        const { _id: itemId, requestedQty } = item;
+
+        // 🔎 Try to find siteInventory
+        let siteInventory = await SiteInventoryModel.findOne({
+          itemId: itemId,
+          siteId: siteId,
+        }).populate({
+          path: "itemId",
+          select: "itemCode category description uom",
+        });
+
+        if (!siteInventory) {
+          let itemData = await ItemModel.findById(itemId).select( "itemCode category description uom");
+          responseData.push({
+            itemCode: itemData?.itemCode || "",
+            category: itemData?.category || "",
+            description: itemData?.description || "",
+            uom: itemData?.uom || "",
+            requestedQty: requestedQty || 0,
+            issuedQuantity: 0,
+            pending: 0 - (requestedQty || 0), 
+          });
+        } else {
+
+          let pending = siteInventory.open - requestedQty;
+
+          responseData.push({
+            itemCode: siteInventory.itemId.itemCode,
+            category: siteInventory.itemId.category,
+            description: siteInventory.itemId.description,
+            uom: siteInventory.itemId.uom,
+            requestedQty: requestedQty,
+            issuedQuantity: siteInventory.issuedQuantity || 0,
+            pending: pending,
+          });
+        }
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: responseData,
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: false,
+      message: err.message,
     });
   }
 });

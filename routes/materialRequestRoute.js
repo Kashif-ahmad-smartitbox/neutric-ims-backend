@@ -285,9 +285,26 @@ router.get("/get-all-approve", protect, async (req, res) => {
         path: "siteId",
         select: "siteName",
       })
+      .populate({
+        path: "items._id",
+        select: "itemCode description uom category gst",
+      })
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ success: true, data: requests });
+    const formattedRequests = requests.map((req) => ({
+      ...req.toObject(),
+      items: req.items.map((it) => ({
+        _id: it._id?._id, // actual item id
+        itemCode: it._id?.itemCode,
+        description: it._id?.description,
+        uom: it._id?.uom,
+        category: it._id?.category,
+        gst: it._id?.gst,
+        requestedQty: it.requestedQty,
+      })),
+    }));
+
+    res.status(200).json({ success: true, data: formattedRequests });
   } catch (error) {
     res.status(500).json({
       success: false,
