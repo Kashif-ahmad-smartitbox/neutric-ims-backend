@@ -4,6 +4,7 @@ const router = express.Router();
 const MaterialRequestModel = require("../models/MaterialRequest");
 const userModel = require("../models/User");
 const InventoryModel = require("../models/Inventotry");
+const ItemModel = require("../models/Item");
 const siteInventoryModel = require("../models/SiteInventory");
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
@@ -210,7 +211,7 @@ router.get("/get-all", protect, async (req, res) => {
   }
 });
 
-router.patch("/update/:id", async (req, res) => {
+router.put("/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -309,6 +310,119 @@ router.get("/get-all-approve", protect, async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Internal server error",
+    });
+  }
+});
+
+router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
+  try {
+    let userId = req.user._id;
+    let siteId = req.user.site;
+
+    // get all approved materialRequests for given site
+    let materialRequests = await MaterialRequestModel.find({
+      requestedTo: userId,
+      siteId: req.params.id,
+      status: "approved",
+    });
+
+    let responseData = [];
+
+    for (const material of materialRequests) {
+      for (const item of material.items) {
+        const { _id: itemId, requestedQty } = item;
+
+        // 🔎 Try to find siteInventory
+        let siteInventory = await SiteInventoryModel.findOne({
+          itemId: itemId,
+          siteId: siteId,
+        }).populate({
+          path: "itemId",
+          select: "itemCode category description uom",
+        });
+
+        if (!siteInventory) {
+          let itemData = await ItemModel.findById(itemId).select(
+            "itemCode category description uom"
+          );
+          responseData.push({
+            itemCode: itemData?.itemCode || "",
+            category: itemData?.category || "",
+            description: itemData?.description || "",
+            uom: itemData?.uom || "",
+            requestedQty: requestedQty || 0,
+            issuedQuantity: 0,
+            pending: 0 - (requestedQty || 0),
+          });
+        } else {
+          let pending = siteInventory.open - requestedQty;
+
+          responseData.push({
+            itemCode: siteInventory.itemId.itemCode,
+            category: siteInventory.itemId.category,
+            description: siteInventory.itemId.description,
+            uom: siteInventory.itemId.uom,
+            requestedQty: requestedQty,
+            issuedQuantity: siteInventory.issuedQuantity || 0,
+            pending: pending,
+          });
+        }
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: responseData,
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: false,
+      message: err.message,
+    });
+  }
+});
+
+router.get("/approved-PO", protect, async (req, res, next) => {
+  try {
+    let userId = req.user._id;
+    let materialRequests = await MaterialRequestModel.find({
+      requestedTo: userId,
+      status: "approved",
+    });
+
+    let responseData = [];
+
+    for (const material of materialRequests) {
+      let materialObj = material.toObject();
+
+      let enrichedItems = [];
+      for (const item of material.items) {
+        const { _id: itemId, requestedQty } = item;
+        let itemData = await ItemModel.findById(itemId).select(
+          "itemCode category description uom"
+        );
+
+        enrichedItems.push({
+          _id: itemId,
+          itemCode: itemData?.itemCode || "",
+          category: itemData?.category || "",
+          description: itemData?.description || "",
+          uom: itemData?.uom || "",
+          requestedQty: requestedQty,
+        });
+      }
+      materialObj.items = enrichedItems;
+      responseData.push(materialObj);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: responseData,
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: false,
+      message: err.message,
     });
   }
 });

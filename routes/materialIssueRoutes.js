@@ -136,15 +136,14 @@ router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
             pending: 0 - (requestedQty || 0), 
           });
         } else {
-
           let pending = siteInventory.open - requestedQty;
-
           responseData.push({
             itemCode: siteInventory.itemId.itemCode,
             category: siteInventory.itemId.category,
             description: siteInventory.itemId.description,
             uom: siteInventory.itemId.uom,
             requestedQty: requestedQty,
+            inhand: siteInventory.inHand ,
             issuedQuantity: siteInventory.issuedQuantity || 0,
             pending: pending,
           });

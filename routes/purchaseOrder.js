@@ -5,9 +5,9 @@ const { protect } = require("../middleware/authMiddleware");
 
 router.post("/create", protect, async (req, res) => {
   try {
-    const { materialRequestNo,  SupplierId,  billTo, shipTo,   items,  deliveryDate  } = req.body;
+    const { materialRequestNo,  SupplierId,  billTo, shipTo,   items,  deliveryDate , igst , sgst, cgst,  } = req.body;
 
-    let requestedBy = req.user.id
+    let createdBy = req.user.id
 
     if (!materialRequestNo ||!SupplierId ||!billTo ||!shipTo ||!items || items.length === 0) {
       return res.status(400).json({
@@ -17,12 +17,12 @@ router.post("/create", protect, async (req, res) => {
     }
 
     const purchaseOrderno = await generatePurchaseOrderNo();
-    const updatedItems = items.map((item) => {
-      const price = Number(item.price) || 0;
-      const gst = Number(item.gst) || 0;
-      const total = price * item.purchaseQty + (price * item.purchaseQty * gst) / 100;
-      return { ...item, price, gst, total };
-    });
+    // const updatedItems = items.map((item) => {
+    //   const price = Number(item.price) || 0;
+    //   const gst = Number(item.gst) || 0;
+    //   const total = price * item.purchaseQty + (price * item.purchaseQty * gst) / 100;
+    //   return { ...item, price, gst, total };
+    // });
 
     const purchaseOrder = await PurchaseOrderModel.create({
       purchaseOrderno,
@@ -30,9 +30,12 @@ router.post("/create", protect, async (req, res) => {
       SupplierId,
       billTo,
       shipTo,
-      items: updatedItems,
+      items,
       deliveryDate,
-      requestedBy,
+      createdBy,
+      igst,
+      sgst,
+      cgst
     });
 
     res.status(201).json({
@@ -46,26 +49,6 @@ router.post("/create", protect, async (req, res) => {
       success: false,
       message: error.message || "Internal server error",
     });
-  }
-});
-
-
-router.get("/get-all", async (req, res) => {
-  try {
-    const orders = await PurchaseOrderModel.find()
-      .populate("SupplierId", "name contact")
-      .populate("shipTo", "siteName location")
-      .populate("items._id", "description uom category")
-      .populate("requestedBy", "name email")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      message: "Purchase Orders fetched successfully",
-      data: orders,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -112,6 +95,26 @@ router.delete("/:id", protect, async (req, res) => {
       message: "Purchase Order deleted successfully",
     });
   } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get("/get-all", async (req, res) => {
+  try {
+    const purchaseOrders = await PurchaseOrderModel.find()
+      .populate("SupplierId", "name contact") 
+      .populate("shipTo", "siteName location") 
+      .populate("billTo", "siteName location") 
+      .populate("items._id", "description uom category") 
+      .populate("createdBy", "name email") 
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      data: purchaseOrders,
+    });
+  } catch (error) {
+    console.error("Error fetching purchase orders:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
