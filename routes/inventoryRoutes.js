@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const InventoryModel = require("../models/Inventotry");
 const siteInventoryModel = require("../models/SiteInventory");
+const MaterialRequestModel = require("../models/MaterialRequest")
 
 const ItemsModel = require("../models/Item");
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
@@ -69,33 +70,44 @@ router.post("/add-opening-stock", protect, async (req, res) => {
 });
 
 
-
 router.get("/get-all-inventory", protect, async (req, res) => {
   try {
-    let query = {};
+    let baseQuery = {};
     if (req.user.role !== "admin") {
-      query.siteId = req.user.site;
+      baseQuery.siteId = req.user.site;
     }
 
-    const SiteInventoryData = await siteInventoryModel.find(query)
+    const approvedRequests = await MaterialRequestModel.find({
+      siteId: baseQuery.siteId || { $exists: true },
+      status: "approved",
+    });
+
+    const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
+      reqDoc.items.map((it) => it._id.toString())
+    );
+
+    const query = {
+      ...baseQuery,
+      $or: [
+        { requestQuantity: 0 },
+        { itemId: { $in: approvedItemIds } },
+      ],
+    };
+
+    const siteInventories = await siteInventoryModel
+      .find(query)
       .populate({
         path: "itemId",
         select: "itemCode description uom category",
       })
       .sort({ createdAt: -1 });
 
-    // const requests = await InventoryModel.find(query)
-    //   .populate({
-    //     path: "itemId",
-    //     select: "itemCode description uom category",
-    //   })
-    //   .sort({ createdAt: -1 });
-
     res.status(200).json({
       success: true,
-      data: SiteInventoryData,
+      data: siteInventories,
     });
   } catch (error) {
+    console.error("Error fetching inventory:", error);
     res.status(500).json({
       success: false,
       message: error.message || "Internal server error",
