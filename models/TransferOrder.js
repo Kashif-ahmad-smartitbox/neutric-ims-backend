@@ -25,6 +25,9 @@ const transferOrderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    exitDateTime: {
+      type: Date,
+    },
   },
   { timestamps: true }
 );

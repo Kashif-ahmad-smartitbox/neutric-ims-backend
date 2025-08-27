@@ -2,21 +2,14 @@ const express = require("express");
 const router = express.Router();
 const MaterialIssueModel = require("../models/MaterialIssue");
 const MaterialRequestModel = require("../models/MaterialRequest");
-const SiteInventoryModel = require("../models/SiteInventory")
-const ItemModel = require("../models/Item")
+const SiteInventoryModel = require("../models/SiteInventory");
+const ItemModel = require("../models/Item");
 const { protect } = require("../middleware/authMiddleware");
 const mongoose = require("mongoose");
 
 router.post("/create", protect, async (req, res) => {
   try {
-    const {
-      transferNo,
-      vehicleNo,
-      exitDateTime,
-      items,
-      issuedTo,
-      destination,
-    } = req.body;
+    const {transferNo , vehicleNo, exitDateTime, items, issuedTo, destination } = req.body;
     const { _id: userId, site: siteId } = req.user;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -26,12 +19,13 @@ router.post("/create", protect, async (req, res) => {
     }
 
     const formattedItems = items.map((i) => ({
-      item : new mongoose.Types.ObjectId(i._id),
+      item: new mongoose.Types.ObjectId(i._id),
       issueQty: i.issueQty,
     }));
 
     const materialIssueNumber = await generateMaterialIssueNumber();
 
+    //
     const newIssue = new MaterialIssueModel({
       items: formattedItems,
       materialIssueNumber,
@@ -47,6 +41,20 @@ router.post("/create", protect, async (req, res) => {
     });
 
     await newIssue.save();
+
+    if (vehicleNo) {
+      let transferNo = await generateTransferNo();
+      const newOrder = new TransferOrder({
+        transferNo: transferNo,
+        vehicleNumber: vehicleNo,
+        from: req.user.site,
+        to: destination._id,
+        requestedBy: req.user._id,
+        requestedTo:destination._id ,
+        exitDateTime : exitDateTime
+      });
+        await newOrder.save();
+    }
 
     res.status(201).json({
       success: true,
@@ -102,7 +110,6 @@ router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
     let userId = req.user._id;
     let siteId = req.user.site;
 
-    
     let materialRequests = await MaterialRequestModel.find({
       requestedTo: userId,
       siteId: req.params.id,
@@ -125,7 +132,9 @@ router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
         });
 
         if (!siteInventory) {
-          let itemData = await ItemModel.findById(itemId).select( "itemCode category description uom");
+          let itemData = await ItemModel.findById(itemId).select(
+            "itemCode category description uom"
+          );
           responseData.push({
             itemCode: itemData?.itemCode || "",
             category: itemData?.category || "",
@@ -133,7 +142,7 @@ router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
             uom: itemData?.uom || "",
             requestedQty: requestedQty || 0,
             issuedQuantity: 0,
-            pending: 0 - (requestedQty || 0), 
+            pending: 0 - (requestedQty || 0),
           });
         } else {
           let pending = siteInventory.open - requestedQty;
@@ -143,7 +152,7 @@ router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
             description: siteInventory.itemId.description,
             uom: siteInventory.itemId.uom,
             requestedQty: requestedQty,
-            inhand: siteInventory.inHand ,
+            inhand: siteInventory.inHand,
             issuedQuantity: siteInventory.issuedQuantity || 0,
             pending: pending,
           });
