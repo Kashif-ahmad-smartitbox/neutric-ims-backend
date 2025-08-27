@@ -4,6 +4,7 @@ const MaterialIssueModel = require("../models/MaterialIssue");
 const MaterialRequestModel = require("../models/MaterialRequest");
 const SiteInventoryModel = require("../models/SiteInventory");
 const ItemModel = require("../models/Item");
+const TransferOrderModel = require("../models/TransferOrder")
 const { protect } = require("../middleware/authMiddleware");
 const mongoose = require("mongoose");
 
@@ -44,7 +45,7 @@ router.post("/create", protect, async (req, res) => {
 
     if (vehicleNo) {
       let transferNo = await generateTransferNo();
-      const newOrder = new TransferOrder({
+      const newOrder = new TransferOrderModel({
         transferNo: transferNo,
         vehicleNumber: vehicleNo,
         from: req.user.site,
