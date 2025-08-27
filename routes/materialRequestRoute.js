@@ -6,6 +6,7 @@ const userModel = require("../models/User");
 const InventoryModel = require("../models/Inventotry");
 const ItemModel = require("../models/Item");
 const siteInventoryModel = require("../models/SiteInventory");
+const PurchaseModel= require("../models/purchaseOrder")
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
 router.post("/create", protect, async (req, res) => {
@@ -117,8 +118,7 @@ router.post("/create", protect, async (req, res) => {
     });
 
     for (const item of items) {
-      const { itemId, requestedQty } = item;
-
+      const  { _id : itemId, requestedQty } = item;
       await siteInventoryModel.findOneAndUpdate(
         { itemId, siteId },
         {
@@ -385,10 +385,27 @@ router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
 router.get("/approved-PO", protect, async (req, res, next) => {
   try {
     let userId = req.user._id;
-    let materialRequests = await MaterialRequestModel.find({
+
+    const materialRequests = await MaterialRequestModel.find({
       requestedTo: userId,
       status: "approved",
-    });
+      materialRequestNo: {
+        $nin: await PurchaseModel.distinct("materialRequestNo"),
+      },
+    })
+      .populate({
+        path: "requestedBy",
+        select: "name",
+      })
+      .populate({
+        path: "requestedTo",
+        select: "name",
+      })
+      .populate({
+        path: "siteId",
+        select: "siteName",
+      })
+      .sort({ createdAt: -1 });
 
     let responseData = [];
 

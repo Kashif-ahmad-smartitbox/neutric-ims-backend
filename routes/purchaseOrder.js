@@ -102,7 +102,7 @@ router.delete("/:id", protect, async (req, res) => {
 router.get("/get-all", async (req, res) => {
   try {
     const purchaseOrders = await PurchaseOrderModel.find()
-      .populate("SupplierId", "name contact") 
+      .populate("SupplierId", "supplierName contactPerson phone email") 
       .populate("shipTo", "siteName location") 
       .populate("billTo", "siteName location") 
       .populate("items._id", "description uom category") 

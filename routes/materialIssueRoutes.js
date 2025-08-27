@@ -102,7 +102,7 @@ router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
     let userId = req.user._id;
     let siteId = req.user.site;
 
-    // get all approved materialRequests for given site
+    
     let materialRequests = await MaterialRequestModel.find({
       requestedTo: userId,
       siteId: req.params.id,
