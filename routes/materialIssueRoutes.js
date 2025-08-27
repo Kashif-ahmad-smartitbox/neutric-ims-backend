@@ -185,4 +185,13 @@ async function generateMaterialIssueNumber() {
   return `MI-${String(nextNumber).padStart(4, "0")}`;
 }
 
+const generateTransferNo = async () => {
+  const lastOrder = await TransferOrderModel.findOne().sort({ createdAt: -1 });
+  if (!lastOrder) return "TO-0001";
+
+  const lastNo = parseInt(lastOrder.transferNo.split("-")[1]) || 0;
+  const newNo = (lastNo + 1).toString().padStart(4, "0");
+  return `TO-${newNo}`;
+};
+
 module.exports = router;
