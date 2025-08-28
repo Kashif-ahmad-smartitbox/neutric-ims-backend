@@ -3,6 +3,17 @@ const mongoose = require("mongoose");
 const transferOrderSchema = new mongoose.Schema(
   {
     transferNo: { type: String, required: true, unique: true },
+    materialIssueNo: { type: String, },
+
+    status: {
+      type: String,
+      enum: ["pending", "approved"],
+      default: "pending",
+    },
+
+    type: {
+      type: String,
+    },
 
     vehicleNumber: {
       type: String,

@@ -77,25 +77,27 @@ router.get("/get-all-inventory", protect, async (req, res) => {
       baseQuery.siteId = req.user.site;
     }
 
-    const approvedRequests = await MaterialRequestModel.find({
-      siteId: baseQuery.siteId || { $exists: true },
-      status: "approved",
-    });
+    // const approvedRequests = await MaterialRequestModel.find({
+    //   siteId: baseQuery.siteId || { $exists: true },
+    //   status: "approved",
+    // });
 
-    const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
-      reqDoc.items.map((it) => it._id.toString())
-    );
 
-    const query = {
-      ...baseQuery,
-      $or: [
-        { requestQuantity: 0 },
-        { itemId: { $in: approvedItemIds } },
-      ],
-    };
+    // const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
+    //   reqDoc.items.map((it) => it._id.toString())
+    // );
+
+    // const query = {
+    //   ...baseQuery,
+    //   $or: [
+    //     // { requestQuantity: 0 },
+    //     { itemId: { $in: approvedItemIds } },
+    //   ],
+    // };
+
 
     const siteInventories = await siteInventoryModel
-      .find(query)
+      .find(baseQuery)
       .populate({
         path: "itemId",
         select: "itemCode description uom category",
@@ -239,13 +241,21 @@ router.get('/get-all-inHandTotal', async (req, res) => {
 
 
 
-router.post('/get-stock',protect ,  async (req, res) => {
+router.post('/get-stock', protect, async (req, res) => {
   try {
-      let itemCode = req.body.itemCodes[0]
+    const { itemCodes } = req.body;
+
+    if (!itemCodes || !Array.isArray(itemCodes) || itemCodes.length === 0) {
+      return res.status(400).json({
+        status: false,
+        message: "itemCodes array is required"
+      });
+    }
+
     const result = await siteInventoryModel.find({
-      siteId : req.user.site ,
-      itemId : itemCode  
-    })
+      siteId: req.user.site,
+      itemId: { $in: itemCodes }
+    });
 
     res.status(200).json({
       status: true,
@@ -259,6 +269,7 @@ router.post('/get-stock',protect ,  async (req, res) => {
     });
   }
 });
+
 
 
 

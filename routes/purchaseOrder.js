@@ -1,15 +1,16 @@
 const express = require("express");
 const router = express.Router();
 const PurchaseOrderModel = require("../models/purchaseOrder");
+const transferOrderModel = require("../models/TransferOrder")
 const { protect } = require("../middleware/authMiddleware");
 
 router.post("/create", protect, async (req, res) => {
   try {
-    const { materialRequestNo,  SupplierId,  billTo, shipTo,   items,  deliveryDate , igst , sgst, cgst,  } = req.body;
+    const { materialRequestNo,  supplier,  billTo, shipTo, totalAmount , grandTotalIncGST , items, createdBy , deliveryDate , igst , sgst, cgst,  } = req.body;
 
-    let createdBy = req.user.id
+    // let createdBy = req.user.id
 
-    if (!materialRequestNo ||!SupplierId ||!billTo ||!shipTo ||!items || items.length === 0) {
+    if (!materialRequestNo ||!supplier ||!billTo ||!shipTo ||!items || items.length === 0) {
       return res.status(400).json({
         success: false,
         message: "Please provide all required fields",
@@ -24,15 +25,18 @@ router.post("/create", protect, async (req, res) => {
     //   return { ...item, price, gst, total };
     // });
 
+
     const purchaseOrder = await PurchaseOrderModel.create({
       purchaseOrderno,
       materialRequestNo,
-      SupplierId,
-      billTo,
-      shipTo,
+      SupplierId : supplier._id,
+      billTo : billTo._id ,
+      shipTo : shipTo._id,
       items,
       deliveryDate,
-      createdBy,
+      totalAmount,
+      grandTotalIncGST ,
+      createdBy : createdBy._id,
       igst,
       sgst,
       cgst
@@ -77,7 +81,6 @@ router.patch("/:id", protect, async (req, res) => {
   }
 });
 
-
 router.delete("/:id", protect, async (req, res) => {
   try {
     const { id } = req.params;
@@ -118,6 +121,56 @@ router.get("/get-all", async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+
+router.get("/get-all-to-be-received", async (req, res) => {
+  try {
+    const purchaseOrders = await PurchaseOrderModel.find()
+      .populate("SupplierId", "supplierName")
+      .populate("shipTo", "siteName")
+      .populate("billTo", "siteName")
+      .populate("createdBy", "name")
+      .sort({ createdAt: -1 });
+
+    const transferOrders = await transferOrderModel.find()
+      .populate("from", "siteName")
+      .populate("to", "siteName")
+      .populate("requestedBy", "name")
+      .sort({ createdAt: -1 });
+
+    const poData = purchaseOrders.map((po) => ({
+      createdAt: po.createdAt,
+      no: po.purchaseOrderno, 
+      type: "Supplied",
+      supplier: po.SupplierId?.supplierName || "-",
+      expectedDate: po.deliveryDate,
+      status: po.status,
+    }));
+
+    const toData = transferOrders.map((to) => ({
+      createdAt: to.createdAt,
+      no: to.transferNo ||  to.materialIssueNo , 
+      type: "Transferred",
+      supplier: to.from?.siteName || "-", 
+      expectedDate: to.exitDateTime,
+      status: to.status,
+    }));
+
+    const combined = [...poData, ...toData].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    res.status(200).json({
+      success: true,
+      data: combined,
+    });
+  } catch (error) {
+    console.error("Error fetching to-be-received:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
 
 
 async function generatePurchaseOrderNo() {

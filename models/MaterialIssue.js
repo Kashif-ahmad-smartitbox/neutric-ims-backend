@@ -2,9 +2,9 @@ const mongoose = require("mongoose");
 
 const materialIssueSchema = new mongoose.Schema(
   {
-    items: [ 
+    items: [
       {
-         _id : false ,
+        _id: false,
         item: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Item",
@@ -43,6 +43,11 @@ const materialIssueSchema = new mongoose.Schema(
       destination: {
         type: String,
         trim: true,
+      },
+
+      transferOrderId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "TransferOrder",
       },
     },
   },

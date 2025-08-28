@@ -13,7 +13,7 @@ const purchaseOrderSchema = new mongoose.Schema(
     },
 
     billTo: {
-      type: mongoose.Schema.Types.ObjectId, 
+      type: mongoose.Schema.Types.ObjectId,
       ref: "Site",
       required: true,
     },
@@ -31,24 +31,29 @@ const purchaseOrderSchema = new mongoose.Schema(
           ref: "Item",
           required: true,
         },
-        requestedQty: { type: Number,  },
-        purchaseQty: { type: Number,  },
-        price: { type: Number,  },
-        gst: { type: Number, },
-        total: { type: Number,  },
+        requestedQty: { type: Number },
+        purchaseQty: { type: Number },
+        price: { type: Number },
+        gst: { type: Number },
+        total: { type: Number },
       },
     ],
 
-    totalAmount: { type: Number,},
+    totalAmount: { type: Number },
     igst: { type: Number, default: 0 },
     sgst: { type: Number, default: 0 },
     cgst: { type: Number, default: 0 },
-    grandTotalIncGST: { type: Number, },
+    grandTotalIncGST: { type: Number },
 
     status: {
       type: String,
       enum: ["pending", "approved"],
       default: "pending",
+    },
+
+    type: {
+      type: String,
+      default: "Supplied",
     },
 
     deliveryDate: { type: Date },

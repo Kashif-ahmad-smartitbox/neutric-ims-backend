@@ -19,10 +19,10 @@ router.post("/create", async (req, res) => {
 });
 
 
-router.get("/", async (req, res) => {
+router.get("/get-all", async (req, res) => {
   try {
     const orders = await TransferOrderModel.find()
-      .populate("from to requestedBy requestedTo", "name siteName email"); // populate related fields
+      .populate("from to requestedBy requestedTo", "name siteName email"); 
     res.json({ success: true, data: orders });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
