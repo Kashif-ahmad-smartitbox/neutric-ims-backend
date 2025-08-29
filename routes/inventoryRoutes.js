@@ -77,27 +77,27 @@ router.get("/get-all-inventory", protect, async (req, res) => {
       baseQuery.siteId = req.user.site;
     }
 
-    // const approvedRequests = await MaterialRequestModel.find({
-    //   siteId: baseQuery.siteId || { $exists: true },
-    //   status: "approved",
-    // });
+    const approvedRequests = await MaterialRequestModel.find({
+      siteId: baseQuery.siteId || { $exists: true },
+      status: "approved",
+    });
 
 
-    // const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
-    //   reqDoc.items.map((it) => it._id.toString())
-    // );
+    const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
+      reqDoc.items.map((it) => it._id.toString())
+    );
 
-    // const query = {
-    //   ...baseQuery,
-    //   $or: [
-    //     // { requestQuantity: 0 },
-    //     { itemId: { $in: approvedItemIds } },
-    //   ],
-    // };
+    const query = {
+      ...baseQuery,
+      $or: [
+        // { requestQuantity: 0 },
+        { itemId: { $in: approvedItemIds } },
+      ],
+    };
 
 
     const siteInventories = await siteInventoryModel
-      .find(baseQuery)
+      .find(query)
       .populate({
         path: "itemId",
         select: "itemCode description uom category",
