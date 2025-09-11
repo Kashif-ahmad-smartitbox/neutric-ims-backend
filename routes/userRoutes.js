@@ -72,6 +72,7 @@ router.post('/add-user',protect ,  async (req, res) => {
 // Login User
 router.post('/login', async (req, res) => {
   const { login, pswd } = req.body;
+  console.log(login, pswd);
   try {
     const user = await User.findOne({
       $or: [{ email: login }, { username: login }],

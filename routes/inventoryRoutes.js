@@ -104,9 +104,18 @@ router.get("/get-all-inventory", protect, async (req, res) => {
       })
       .sort({ createdAt: -1 });
 
+    // Calculate pending quantity for each inventory item
+    const inventoriesWithPending = siteInventories.map(inventory => {
+      const pending = Math.max(0, inventory.requestQuantity - inventory.issuedQuantity);
+      return {
+        ...inventory.toObject(),
+        pending: pending
+      };
+    });
+
     res.status(200).json({
       success: true,
-      data: siteInventories,
+      data: inventoriesWithPending,
     });
   } catch (error) {
     console.error("Error fetching inventory:", error);

@@ -11,12 +11,12 @@ const materialRequestSchema = new mongoose.Schema(
     requestedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      // required: true,
     },
     siteId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Site",
-      required: true,
+      // required: true,
     },
 
     items: [

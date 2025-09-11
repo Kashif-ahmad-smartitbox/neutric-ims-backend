@@ -21,7 +21,7 @@ const transferOrderSchema = new mongoose.Schema(
     from: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Site",
-      required: true,
+      // required: true,
     },
     to: {
       type: mongoose.Schema.Types.ObjectId,

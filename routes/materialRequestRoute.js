@@ -27,68 +27,7 @@ router.post("/create", protect, async (req, res) => {
       requestedQty: Number(item.requestedQty),
     }));
 
-    // let existingRequest = await MaterialRequestModel.findOne({
-    //   requestedBy: userId,
-    //   status: "pending",
-    // });
 
-    // if (existingRequest) {
-    //   for (const item of items) {
-    //     const existingItem = existingRequest.items.find(
-    //       (i) => i.itemId === item.itemId
-    //     );
-    //     if (existingItem) {
-    //       existingItem.requestedQty += item.requestedQty;
-    //     } else {
-    //       existingRequest.items.push(item);
-    //     }
-    //   }
-
-    //   await existingRequest.save();
-
-    //   for (const item of items) {
-    //     const { itemId, requestedQty } = item;
-
-    //     await siteInventoryModel.findOneAndUpdate(
-    //       { itemId, siteId },
-    //       {
-    //         $inc: {
-    //           requestQuantity: requestedQty,
-    //         },
-    //         $setOnInsert: {
-    //           open: 0,
-    //           issuedQuantity: 0,
-    //           mip: 0,
-    //           inHand: 0,
-    //         },
-    //       },
-    //       { new: true, upsert: true }
-    //     );
-
-    //     await InventoryModel.findOneAndUpdate(
-    //       { itemId },
-    //       {
-    //         $inc: {
-    //           requestQuantity: requestedQty,
-    //         },
-    //         $setOnInsert: {
-    //           open: 0,
-    //           issuedQuantity: 0,
-    //           mip: 0,
-    //           inHand: 0,
-    //           siteId,
-    //         },
-    //       },
-    //       { new: true, upsert: true }
-    //     );
-    //   }
-
-    //   return res.status(200).json({
-    //     success: true,
-    //     message: "Material request updated successfully",
-    //     data: existingRequest,
-    //   });
-    // }
 
     let requestedTo;
     if (req.user.role === "junior site engineer") {
@@ -275,11 +214,109 @@ router.delete("/delete/:id", async (req, res) => {
 
 router.get("/get-all-approve", protect, async (req, res) => {
   try {
-    const requests = await MaterialRequestModel.find({
-      requestedTo: new mongoose.Types.ObjectId(req.user._id),
-    })
+    let query = {};
+
+    // Role-based filtering
+    if (req.user.role === "site store incharge") {
+      const juniorIds = await mongoose.model('User').find({ role: 'junior site engineer' }).distinct('_id');
+      query = {
+        $and: [
+          { siteId: new mongoose.Types.ObjectId(req.user.site) },
+          { requestedBy: { $in: juniorIds } },
+          { requestedBy: { $ne: new mongoose.Types.ObjectId(req.user._id) } }
+        ]
+      };
+    } else if (req.user.role === "center store incharge") {
+      const siteStoreIds = await mongoose.model('User').find({ role: 'site store incharge' }).distinct('_id');
+      query = {
+        $and: [
+          { requestedBy: { $in: siteStoreIds } },
+          { requestedBy: { $ne: new mongoose.Types.ObjectId(req.user._id) } }
+        ]
+      };
+    } else if (req.user.role === "purchase manager") {
+      const centerStoreIds = await mongoose.model('User').find({ role: 'center store incharge' }).distinct('_id');
+      query = {
+        $and: [
+          { requestedBy: { $in: centerStoreIds } },
+          { requestedBy: { $ne: new mongoose.Types.ObjectId(req.user._id) } }
+        ]
+      };
+    } else if (req.user.role === "admin") {
+      query = {
+        requestedBy: { $ne: new mongoose.Types.ObjectId(req.user._id) }
+      };
+    } else {
+      query = {
+        $and: [
+          { requestedTo: new mongoose.Types.ObjectId(req.user._id) },
+          { requestedBy: { $ne: new mongoose.Types.ObjectId(req.user._id) } }
+        ]
+      };
+    }
+
+    const requests = await MaterialRequestModel.find(query)
       .populate({
         path: "requestedBy",
+        select: "name role",
+      })
+      .populate({
+        path: "siteId",
+        select: "siteName",
+      })
+      .populate({
+        path: "items._id",
+        select: "itemCode description uom category gst",
+      })
+      .sort({ createdAt: -1 });
+
+    const formattedRequests = requests.map((req) => ({
+      ...req.toObject(),
+      items: req.items.map((it) => ({
+        _id: it._id?._id,
+        itemCode: it._id?.itemCode,
+        description: it._id?.description,
+        uom: it._id?.uom,
+        category: it._id?.category,
+        gst: it._id?.gst,
+        requestedQty: it.requestedQty,
+      })),
+    }));
+
+    res.status(200).json({ success: true, data: formattedRequests });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+});
+
+router.get("/get-all-approved", protect, async (req, res) => {
+  try {
+    let query = {
+      status: "approved"
+    };
+
+    // Role-based filtering
+    if (req.user.role === "site store incharge") {
+      // Site store incharge can only see approved requests from their own site
+      query.siteId = new mongoose.Types.ObjectId(req.user.site);
+    } else if (req.user.role === "center store incharge" || req.user.role === "purchase manager" || req.user.role === "admin") {
+      // These roles can see all approved material requests - no additional filtering needed
+      // query already has status: "approved"
+    } else {
+      // For other roles, show only approved requests where they are the requestedTo
+      query.requestedTo = new mongoose.Types.ObjectId(req.user._id);
+    }
+
+    const requests = await MaterialRequestModel.find(query)
+      .populate({
+        path: "requestedBy",
+        select: "name",
+      })
+      .populate({
+        path: "requestedTo",
         select: "name",
       })
       .populate({
@@ -317,58 +354,165 @@ router.get("/get-all-approve", protect, async (req, res) => {
 router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
   try {
     let userId = req.user._id;
+    let targetSiteId = req.params.id;
+
+    // Determine siteId for inventory lookup
     let siteId = req.user.site;
+    if (
+      req.user.role === "center store incharge" ||
+      req.user.role === "purchase manager" ||
+      req.user.role === "admin"
+    ) {
+      // For center store incharge, use null siteId for their own inventory
+      siteId = req.user.role === "center store incharge" ? null : targetSiteId;
+    }
 
-    // get all approved materialRequests for given site
-    let materialRequests = await MaterialRequestModel.find({
-      requestedTo: userId,
-      siteId: req.params.id,
+    // Role-based filtering for material requests
+    let materialRequestQuery = {
+      siteId: targetSiteId,
       status: "approved",
-    });
+    };
 
-    let responseData = [];
+    // Apply role-based filtering
+    if (req.user.role === "site store incharge") {
+      if (targetSiteId !== req.user.site) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied. You can only view your own site's data.",
+        });
+      }
+      const juniorIds = await mongoose
+        .model("User")
+        .find({ role: "junior site engineer" })
+        .distinct("_id");
+      materialRequestQuery.$and = [
+        { requestedBy: { $in: juniorIds } },
+        { requestedBy: { $ne: new mongoose.Types.ObjectId(userId) } },
+      ];
+    } else if (req.user.role === "center store incharge") {
+      const siteStoreIds = await mongoose
+        .model("User")
+        .find({ role: "site store incharge" })
+        .distinct("_id");
+      materialRequestQuery.$and = [
+        { requestedBy: { $in: siteStoreIds } },
+        { requestedBy: { $ne: new mongoose.Types.ObjectId(userId) } },
+      ];
+    } else if (req.user.role === "purchase manager") {
+      const centerStoreIds = await mongoose
+        .model("User")
+        .find({ role: "center store incharge" })
+        .distinct("_id");
+      materialRequestQuery.$and = [
+        { requestedBy: { $in: centerStoreIds } },
+        { requestedBy: { $ne: new mongoose.Types.ObjectId(userId) } },
+      ];
+    } else if (req.user.role === "admin") {
+      materialRequestQuery.requestedBy = {
+        $ne: new mongoose.Types.ObjectId(userId),
+      };
+    } else {
+      materialRequestQuery.$and = [
+        { requestedTo: new mongoose.Types.ObjectId(userId) },
+        { requestedBy: { $ne: new mongoose.Types.ObjectId(userId) } },
+      ];
+    }
+
+    // Get all approved materialRequests for given site
+    let materialRequests = await MaterialRequestModel.find(materialRequestQuery)
+      .populate({
+        path: "requestedBy",
+        select: "name role",
+      })
+      .populate({
+        path: "siteId",
+        select: "siteName",
+      })
+      .populate({
+        path: "items._id",
+        select: "itemCode category description uom",
+      });
+
+    // Use a Map to combine items by itemCode
+    let itemsMap = new Map();
 
     for (const material of materialRequests) {
       for (const item of material.items) {
         const { _id: itemId, requestedQty } = item;
 
-        // 🔎 Try to find siteInventory
-        let siteInventory = await SiteInventoryModel.findOne({
-          itemId: itemId,
-          siteId: siteId,
-        }).populate({
-          path: "itemId",
-          select: "itemCode category description uom",
-        });
+        // Try to find siteInventory
+        let siteInventory = await siteInventoryModel
+          .findOne({
+            itemId: itemId,
+            siteId: siteId, // Use null for center store incharge
+          })
+          .populate({
+            path: "itemId",
+            select: "itemCode category description uom",
+          });
 
+        let itemCode, category, description, uom;
         if (!siteInventory) {
+          // Fallback to ItemModel if no siteInventory found
           let itemData = await ItemModel.findById(itemId).select(
             "itemCode category description uom"
           );
-          responseData.push({
-            itemCode: itemData?.itemCode || "",
-            category: itemData?.category || "",
-            description: itemData?.description || "",
-            uom: itemData?.uom || "",
-            requestedQty: requestedQty || 0,
-            issuedQuantity: 0,
-            pending: 0 - (requestedQty || 0),
-          });
+          if (!itemData) continue;
+          itemCode = itemData.itemCode;
+          category = itemData.category;
+          description = itemData.description;
+          uom = itemData.uom;
         } else {
-          let pending = siteInventory.open - requestedQty;
+          itemCode = siteInventory.itemId.itemCode;
+          category = siteInventory.itemId.category;
+          description = siteInventory.itemId.description;
+          uom = siteInventory.itemId.uom;
+        }
 
-          responseData.push({
-            itemCode: siteInventory.itemId.itemCode,
-            category: siteInventory.itemId.category,
-            description: siteInventory.itemId.description,
-            uom: siteInventory.itemId.uom,
-            requestedQty: requestedQty,
-            issuedQuantity: siteInventory.issuedQuantity || 0,
-            pending: pending,
-          });
+        // Check if item already exists in the map by itemCode
+        if (itemsMap.has(itemCode)) {
+          // Combine quantities for existing item
+          const existingItem = itemsMap.get(itemCode);
+          existingItem.requestedQty += requestedQty || 0;
+          existingItem.pending = Math.max(
+            0,
+            existingItem.requestedQty - existingItem.issuedQuantity
+          );
+          itemsMap.set(itemCode, existingItem);
+        } else {
+          if (!siteInventory) {
+            itemsMap.set(itemCode, {
+              _id: itemId,
+              itemCode: itemCode,
+              category: category,
+              description: description,
+              uom: uom,
+              requestedQty: requestedQty || 0,
+              issuedQuantity: 0,
+              pending: Math.max(0, (requestedQty || 0) - 0),
+            });
+          } else {
+            let pending = Math.max(
+              0,
+              (requestedQty || 0) - (siteInventory.issuedQuantity || 0)
+            );
+            itemsMap.set(itemCode, {
+              _id: itemId,
+              itemCode: itemCode,
+              category: category,
+              description: description,
+              uom: uom,
+              requestedQty: requestedQty || 0,
+              issuedQuantity: siteInventory.issuedQuantity || 0,
+              pending: pending,
+            });
+          }
         }
       }
     }
+
+    // Convert Map values to array
+    let responseData = Array.from(itemsMap.values());
 
     res.status(200).json({
       success: true,
@@ -376,7 +520,7 @@ router.get("/get-all-cw-issue/:id", protect, async (req, res, next) => {
     });
   } catch (err) {
     res.status(500).json({
-      status: false,
+      success: false,
       message: err.message,
     });
   }
