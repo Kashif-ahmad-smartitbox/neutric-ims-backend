@@ -44,6 +44,11 @@ const materialIssueSchema = new mongoose.Schema(
         type: String,
         trim: true,
       },
+      materialInwardStatus:{
+        type: String,
+        enum: ["pending", "approved", 'partially received'],
+        default: "pending",
+      },
 
       transferOrderId: {
         type: mongoose.Schema.Types.ObjectId,

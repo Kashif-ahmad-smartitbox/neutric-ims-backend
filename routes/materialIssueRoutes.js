@@ -515,6 +515,10 @@ router.get("/get-all-to-be-received", protect, async (req, res) => {
         select: "_id name role",
       })
       .populate({
+        path: "issuedTo",
+        select: "siteName address state city",
+      })
+      .populate({
         path: "items.item",
         select: "itemCode description uom category gst",
       })
@@ -554,6 +558,13 @@ router.get("/get-all-to-be-received", protect, async (req, res) => {
           supplier: "Central Warehouse",
           exitDateTime: issue.shipmentDetails?.dateAndExitTime?.toISOString() || null,
           status: issue.shipmentDetails?.status || "Pending",
+          issuedTo: {
+            _id: issue.issuedTo?._id,
+            siteName: issue.issuedTo?.siteName,
+            address: issue.issuedTo?.address,
+            state: issue.issuedTo?.state,
+            city: issue.issuedTo?.city,
+          },
           items,
         };
       })

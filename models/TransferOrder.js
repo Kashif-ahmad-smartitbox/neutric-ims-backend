@@ -13,6 +13,7 @@ const transferOrderSchema = new mongoose.Schema(
 
     type: {
       type: String,
+      enum: ["Transferred", "Supplied"],
     },
 
     vehicleNumber: {
