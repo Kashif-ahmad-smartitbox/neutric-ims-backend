@@ -17,10 +17,23 @@ const itemSchema = new mongoose.Schema({
     required: [true, 'Unit of measurement is required'],
     trim: true,
   },
+  subCategory: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   category: {
     type: String,
     required: [true, 'Category is required'],
     trim: true,
+  },
+  openingStock: {
+    type: Number,
+    default: 0,
+  },
+  lastPurchasePrice: {
+    type: Number,
+    default: 0,
   },
   gst: {
     type: Number,

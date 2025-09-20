@@ -58,36 +58,55 @@ router.post("/create", protect, async (req, res) => {
 
     for (const item of items) {
       const  { _id : itemId, requestedQty } = item;
+
+      
+      // Check if the requester is center store incharge
+      const isCenterStoreIncharge = req.user.role === "center store incharge";
+      
+      // Prepare the update object for siteInventory
+      const siteInventoryUpdate = {
+        $inc: isCenterStoreIncharge 
+          ? { mip: requestedQty }
+          : { requestQuantity: requestedQty },
+        $setOnInsert: {
+          open: 0,
+          issuedQuantity: 0,
+          inHand: 0,
+        },
+      };
+      
+      // Only set mip to 0 on insert if it's not a center store incharge
+      if (!isCenterStoreIncharge) {
+        siteInventoryUpdate.$setOnInsert.mip = 0;
+      }
+
       await siteInventoryModel.findOneAndUpdate(
         { itemId, siteId },
-        {
-          $inc: {
-            requestQuantity: requestedQty,
-          },
-          $setOnInsert: {
-            open: 0,
-            issuedQuantity: 0,
-            mip: 0,
-            inHand: 0,
-          },
-        },
+        siteInventoryUpdate,
         { new: true, upsert: true }
       );
 
+      // Prepare the update object for Inventory
+      const inventoryUpdate = {
+        $inc: isCenterStoreIncharge 
+          ? { mip: requestedQty }
+          : { requestQuantity: requestedQty },
+        $setOnInsert: {
+          open: 0,
+          issuedQuantity: 0,
+          inHand: 0,
+          siteId,
+        },
+      };
+      
+      // Only set mip to 0 on insert if it's not a center store incharge
+      if (!isCenterStoreIncharge) {
+        inventoryUpdate.$setOnInsert.mip = 0;
+      }
+
       await InventoryModel.findOneAndUpdate(
         { itemId },
-        {
-          $inc: {
-            requestQuantity: requestedQty,
-          },
-          $setOnInsert: {
-            open: 0,
-            issuedQuantity: 0,
-            mip: 0,
-            inHand: 0,
-            siteId,
-          },
-        },
+        inventoryUpdate,
         { new: true, upsert: true }
       );
     }
@@ -111,9 +130,15 @@ router.get("/get-all", protect, async (req, res) => {
     let siteId = req.user.site;
     let userId = req.user._id;
 
-    const requests = await MaterialRequestModel.find({
-      requestedBy: new mongoose.Types.ObjectId(userId),
-    })
+    // Build query based on user role
+    let query = {};
+    if (req.user.role !== 'admin') {
+      // Non-admin users only see their own requests
+      query.requestedBy = new mongoose.Types.ObjectId(userId);
+    }
+    // Admin users see all requests (no additional filter)
+
+    const requests = await MaterialRequestModel.find(query)
       .populate({
         path: "requestedBy",
         select: "name",

@@ -155,6 +155,7 @@ router.post("/create", protect, async (req, res) => {
     }));
 
     const materialIssueNumber = await generateMaterialIssueNumber();
+    let transferNoGen = await generateTransferNo();
     const newIssue = new MaterialIssueModel({
       items: formattedItems,
       materialIssueNumber,
@@ -162,7 +163,7 @@ router.post("/create", protect, async (req, res) => {
       issuedBy: userId,
       issuedTo,
       shipmentDetails: {
-        transferNo,
+        transferNo: transferNoGen,
         vehicleNo,
         dateAndExitTime: exitDateTime,
         destination,
@@ -212,7 +213,7 @@ router.post("/create", protect, async (req, res) => {
         type = "Transferred";
       }
 
-      let transferNoGen = await generateTransferNo();
+    
 
       const newOrder = new TransferOrderModel({
         transferNo: transferNoGen,
@@ -381,10 +382,15 @@ router.get("/get-all-issue", protect, async (req, res) => {
   try {
     const { site: siteId, _id: userId } = req.user;
 
-    const getMaterialIssue = await MaterialIssueModel.find({
-      issuedBy: userId,
-      // issuedTo: siteId,
-    })
+    // Build query based on user role
+    let query = {};
+    if (req.user.role !== 'admin') {
+      // Non-admin users only see their own issues
+      query.issuedBy = userId;
+    }
+    // Admin users see all issues (no additional filter)
+
+    const getMaterialIssue = await MaterialIssueModel.find(query)
       .populate({
         path: "issuedBy",
         select: " _id name ",
@@ -485,31 +491,38 @@ router.get("/get-all-to-be-received", protect, async (req, res) => {
   try {
     const { site: userSiteId, _id: userId, role } = req.user;
 
-    // Restrict access to site store incharge only
-    if (role !== "site store incharge") {
+    // Restrict access to site store incharge and admin only
+    if (role !== "site store incharge" && role !== "admin") {
       return res.status(403).json({
         success: false,
-        message: "Access denied. Only site store incharge can access this route.",
+        message: "Access denied. Only site store incharge and admin can access this route.",
       });
     }
 
-    // Validate userSiteId
-    if (!mongoose.Types.ObjectId.isValid(userSiteId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid site ID for user.",
-      });
-    }
-
-    // Find material issues for the user's site where status is pending or not set
-    const materialIssues = await MaterialIssueModel.find({
-      issuedTo: userSiteId,
+    // Build query based on user role
+    let query = {
       issuedBy: { $ne: userId },
       $or: [
         { "shipmentDetails.status": { $exists: false } },
         { "shipmentDetails.status": "pending" }
       ]
-    })
+    };
+
+    // For site store incharge, filter by their site
+    if (role === "site store incharge") {
+      // Validate userSiteId
+      if (!mongoose.Types.ObjectId.isValid(userSiteId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid site ID for user.",
+        });
+      }
+      query.issuedTo = userSiteId;
+    }
+    // For admin, no site filter (see all sites)
+
+    // Find material issues where status is pending or not set
+    const materialIssues = await MaterialIssueModel.find(query)
       .populate({
         path: "issuedBy",
         select: "_id name role",

@@ -2,7 +2,9 @@ const express = require("express");
 const router = express.Router();
 const InventoryModel = require("../models/Inventotry");
 const siteInventoryModel = require("../models/SiteInventory");
-const MaterialRequestModel = require("../models/MaterialRequest")
+const MaterialRequestModel = require("../models/MaterialRequest");
+const MaterialIssueModel = require("../models/MaterialIssue");
+const SiteModel = require("../models/Site");
 
 const ItemsModel = require("../models/Item");
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
@@ -77,27 +79,9 @@ router.get("/get-all-inventory", protect, async (req, res) => {
       baseQuery.siteId = req.user.site;
     }
 
-    const approvedRequests = await MaterialRequestModel.find({
-      siteId: baseQuery.siteId || { $exists: true },
-      status: "approved",
-    });
-
-
-    const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
-      reqDoc.items.map((it) => it._id.toString())
-    );
-
-    const query = {
-      ...baseQuery,
-      $or: [
-        // { requestQuantity: 0 },
-        { itemId: { $in: approvedItemIds } },
-      ],
-    };
-
-
+    // Get all inventory for the site (no filtering based on material requests)
     const siteInventories = await siteInventoryModel
-      .find(query)
+      .find(baseQuery)
       .populate({
         path: "itemId",
         select: "itemCode description uom category",
@@ -106,7 +90,7 @@ router.get("/get-all-inventory", protect, async (req, res) => {
 
     // Calculate pending quantity for each inventory item
     const inventoriesWithPending = siteInventories.map(inventory => {
-      const pending = Math.max(0, inventory.requestQuantity - inventory.issuedQuantity);
+      const pending = Math.max(0, inventory.requestQuantity - inventory.inHand);
       return {
         ...inventory.toObject(),
         pending: pending
@@ -125,6 +109,62 @@ router.get("/get-all-inventory", protect, async (req, res) => {
     });
   }
 });
+
+// router.get("/get-all-inventory", protect, async (req, res) => {
+//   try {
+//     let baseQuery = {};
+//     if (req.user.role !== "admin") {
+//       baseQuery.siteId = req.user.site;
+//     }
+
+//     const approvedRequests = await MaterialRequestModel.find({
+//       siteId: baseQuery.siteId || { $exists: true },
+//       status: "approved",
+//     });
+
+
+//     const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
+//       reqDoc.items.map((it) => it._id.toString())
+//     );
+
+//     const query = {
+//       ...baseQuery,
+//       $or: [
+//         // { requestQuantity: 0 },
+//         { itemId: { $in: approvedItemIds } },
+//       ],
+//     };
+
+
+//     const siteInventories = await siteInventoryModel
+//       .find(query)
+//       .populate({
+//         path: "itemId",
+//         select: "itemCode description uom category",
+//       })
+//       .sort({ createdAt: -1 });
+
+//     // Calculate pending quantity for each inventory item
+//     const inventoriesWithPending = siteInventories.map(inventory => {
+//       const pending = Math.max(0, inventory.requestQuantity - inventory.issuedQuantity);
+//       return {
+//         ...inventory.toObject(),
+//         pending: pending
+//       };
+//     });
+
+//     res.status(200).json({
+//       success: true,
+//       data: inventoriesWithPending,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching inventory:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: error.message || "Internal server error",
+//     });
+//   }
+// });
 
 // router.patch("/update/:id", async (req, res) => {
 //   try {
@@ -221,6 +261,9 @@ router.get('/get-all-inHandTotal', async (req, res) => {
           description: { $first: "$itemData.description" },
           uom: { $first: "$itemData.uom" },
           category: { $first: "$itemData.category" },
+          subCategory: { $first: "$itemData.subCategory" },
+          openingStock: { $first: "$itemData.openingStock" },
+          lastPurchasePrice: { $first: "$itemData.lastPurchasePrice" },
           sites: {
             $push: {
               siteId: "$siteId",
@@ -282,5 +325,140 @@ router.post('/get-stock', protect, async (req, res) => {
 
 
 
+
+// Get composed in-hand inventory
+router.get('/get-composed-inventory', protect, async (req, res) => {
+  try {
+    // Get all sites for the response structure
+    const sites = await SiteModel.find({}, 'siteName _id').sort({ siteName: 1 });
+    
+    // Get all items with their basic information
+  const items = await ItemsModel.find({}, 'itemCode description uom category subCategory openingStock lastPurchasePrice').sort({ itemCode: 1 });
+    
+    // Get all site inventories
+    const siteInventories = await siteInventoryModel.find({}).populate('itemId', 'itemCode');
+    
+    // Get center store inventory (where siteId is null) from InventoryModel
+    const centerStoreInventories = await InventoryModel.find({ siteId: null }).populate('itemId', 'itemCode');
+    
+    // Get all material issues to calculate issued quantities
+    const materialIssues = await MaterialIssueModel.find({}).populate('items.item', 'itemCode');
+    
+    // Create a map to store total issued quantities per item per site
+    const issuedQuantitiesMap = new Map();
+    
+    // Process material issues to calculate issued quantities
+    materialIssues.forEach(issue => {
+      // Skip if issuedTo is null or undefined
+      if (!issue.issuedTo) return;
+      
+      const siteId = issue.issuedTo.toString();
+      issue.items.forEach(item => {
+        // Skip if item or item._id is null/undefined
+        if (!item || !item.item || !item.item._id) return;
+        
+        const itemId = item.item._id.toString();
+        const key = `${itemId}-${siteId}`;
+        const currentQty = issuedQuantitiesMap.get(key) || 0;
+        issuedQuantitiesMap.set(key, currentQty + item.issueQty);
+      });
+    });
+    
+    // Create a map to store site inventories
+    const siteInventoryMap = new Map();
+    siteInventories.forEach(inv => {
+      // Skip if required fields are null/undefined
+      if (!inv || !inv.itemId || !inv.itemId._id || !inv.siteId) return;
+      
+      const key = `${inv.itemId._id.toString()}-${inv.siteId.toString()}`;
+      siteInventoryMap.set(key, inv);
+    });
+    
+    // Create a map to store center store inventories
+    const centerStoreInventoryMap = new Map();
+    centerStoreInventories.forEach(inv => {
+      // Skip if required fields are null/undefined
+      if (!inv || !inv.itemId || !inv.itemId._id) return;
+      
+      const key = `${inv.itemId._id.toString()}-center`;
+      centerStoreInventoryMap.set(key, inv);
+    });
+    
+    // Process each item to create the composed inventory
+    const composedInventory = items.map(item => {
+      const itemId = item._id.toString();
+      const sitesData = {};
+      let totalInHand = 0;
+      
+      // Process each site for this item
+      sites.forEach(site => {
+        // Skip if site or site._id is null/undefined
+        if (!site || !site._id) return;
+        
+        const siteId = site._id.toString();
+        const key = `${itemId}-${siteId}`;
+        
+        // Get site inventory (opening stock)
+        const siteInventory = siteInventoryMap.get(key);
+        const openingStock = siteInventory ? siteInventory.open : 0;
+        
+        // Get issued quantity for this item at this site
+        const issuedQty = issuedQuantitiesMap.get(key) || 0;
+        
+        // Calculate in-hand: opening stock - material issue
+        const inHand = Math.max(0, openingStock - issuedQty);
+        
+        sitesData[siteId] = inHand;
+        totalInHand += inHand;
+      });
+      
+      // Handle center store inventory (where siteId is null)
+      const centerKey = `${itemId}-center`;
+      const centerInventory = centerStoreInventoryMap.get(centerKey);
+      if (centerInventory) {
+        const centerOpeningStock = centerInventory.open || 0;
+        // For center store, we don't subtract issued quantities as it's the source
+        const centerInHand = centerOpeningStock;
+        sitesData['center'] = centerInHand;
+        totalInHand += centerInHand;
+      }
+      
+        // Determine unit price: prefer lastPurchasePrice if > 0, otherwise fall back to openingStock
+        const unitPrice = (item.lastPurchasePrice && item.lastPurchasePrice > 0) ? item.lastPurchasePrice : (item.openingStock || 0);
+
+        return {
+          _id: item._id,
+          itemCode: item.itemCode,
+          description: item.description,
+          uom: item.uom,
+          category: item.category,
+          subCategory: item.subCategory || '',
+          openingStock: item.openingStock || 0,
+          lastPurchasePrice: item.lastPurchasePrice || 0,
+          unitPrice,
+          totalInHand: totalInHand,
+          totalValue: parseFloat((unitPrice * totalInHand).toFixed(2)),
+          sites: sitesData
+        };
+    });
+    
+    // Filter out items that have zero total in-hand quantity
+    const filteredInventory = composedInventory.filter(item => item.totalInHand > 0);
+    
+    res.status(200).json({
+      success: true,
+      message: "Composed inventory fetched successfully",
+      inventory: filteredInventory,
+      sites: sites
+    });
+    
+  } catch (error) {
+    console.error("Error fetching composed inventory:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error"
+    });
+  }
+});
 
 module.exports = router;
