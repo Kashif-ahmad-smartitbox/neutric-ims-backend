@@ -131,24 +131,26 @@ router.get('/get-all-users',  async (req, res) => {
 // Update User
 router.put('/update-user/:userId',  async (req, res) => {
   const { userId } = req.params;
-  const { name, email, mobile, username, pswd, role, site } = req.body;
+  // accept both `password` (frontend) and `pswd` (legacy)
+  const { name, email, mobile, username, pswd, password, role, site } = req.body;
   try {
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const updateData = {
-      name: name || user.name,
-      email: email || user.email,
-      mobile: mobile || user.mobile,
-      username: username || user.username,
-      role: role || user.role,
-    };
+    // update simple fields on the document so that pre-save hook can run when password changes
+    user.name = name || user.name;
+    user.email = email || user.email;
+    user.mobile = mobile || user.mobile;
+    user.username = username || user.username;
+    user.role = role || user.role;
 
-    if (pswd) {
-      const salt = await bcrypt.genSalt(10);
-      updateData.pswd = await bcrypt.hash(pswd, salt);
+    // handle password: frontend sends `password`; some parts may send `pswd`
+    const newPassword = password || pswd;
+    if (newPassword) {
+      // assign to pswd so pre('save') hook hashes it
+      user.pswd = newPassword;
     }
 
     if (site) {
@@ -156,15 +158,13 @@ router.put('/update-user/:userId',  async (req, res) => {
       if (!siteExists) {
         return res.status(400).json({ success: false, message: 'Invalid site' });
       }
-      updateData.site = site;
+      user.site = site;
     } else if (site === '') {
-      updateData.site = null;
+      user.site = null;
     }
 
-    const updatedUser = await User.findByIdAndUpdate(userId, updateData, {
-      new: true,
-      runValidators: true,
-    }).populate('site');
+    const updatedUser = await user.save();
+    await updatedUser.populate('site');
 
     res.status(200).json({
       success: true,
