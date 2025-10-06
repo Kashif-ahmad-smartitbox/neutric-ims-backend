@@ -13,11 +13,6 @@ const purchaseOrderSchema = new mongoose.Schema(
       required: [true, "Material request number is required"],
       trim: true,
     },
-    supplier: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Supplier",
-      required: [true, "Supplier is required"],
-    },
     billTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Site",
@@ -53,9 +48,11 @@ const purchaseOrderSchema = new mongoose.Schema(
         receivedQty: { type: Number, default: 0 },
         pendingQty: { type: Number, default: function() { return this.purchaseQty; } },
         status: { type: String, enum: ["Pending", "partially received", "Completed"], default: "Pending" },
-        price: { type: Number, required: true },
-        gst: { type: Number, required: true },
-        total: { type: Number, required: true },
+        supplier: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Supplier",
+          required: true,
+        },
       },
     ],
     totalAmount: {
@@ -82,7 +79,7 @@ const purchaseOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["Pending", "Approved", "Closed", "partially received"],
+      enum: ["Pending", "Approved", "Closed", "partially received", "Completed"],
       default: "Pending",
     },
     pdfLink: {

@@ -12,7 +12,7 @@ const TransferOrder = require("../models/TransferOrder");
 router.get("/get-all", protect, async (req, res) => {
   try {
     const purchaseOrders = await PurchaseOrder.find()
-      .populate("supplier", "supplierName address state gstin email")
+      .populate("items.supplier", "supplierName address state gstin email")
       .populate("createdBy", "name");
     
     // Manually populate billTo and shipTo based on whether it's a Site or User reference
@@ -122,26 +122,31 @@ router.post("/create", protect, async (req, res) => {
     });
     await purchaseOrder.save();
 
-    // Create Transfer Order with type "Supplied"
-    const transferNo = await generateTransferNo();
-    const transferOrder = new TransferOrder({
-      transferNo: transferNo,
-      materialIssueNo: purchaseOrder.purchaseOrderNo, // Using PO number as reference
-      type: "Supplied",
-      vehicleNumber: req.body.vehicleNumber || null,
-      from: req.body.supplier, // Supplier as the source
-      to: req.body.shipTo, // Ship to site as destination
-      requestedBy: req.user._id,
-      requestedTo: req.body.shipTo, // Same as destination for supplied items
-      exitDateTime: req.body.deliveryDate, // Using delivery date as exit date
-    });
-
-    await transferOrder.save();
+    // Create Transfer Orders with type "Supplied" for each unique supplier
+    const uniqueSuppliers = [...new Set(purchaseOrder.items.map(item => item.supplier.toString()))];
+    
+    const transferOrders = await Promise.all(
+      uniqueSuppliers.map(async (supplierId) => {
+        const transferNo = await generateTransferNo();
+        const transferOrder = new TransferOrder({
+          transferNo: transferNo,
+          materialIssueNo: purchaseOrder.purchaseOrderNo, // Using PO number as reference
+          type: "Supplied",
+          vehicleNumber: req.body.vehicleNumber || null,
+          from: supplierId, // Supplier as the source
+          to: req.body.shipTo, // Ship to site as destination
+          requestedBy: req.user._id,
+          requestedTo: req.body.shipTo, // Same as destination for supplied items
+          exitDateTime: req.body.deliveryDate, // Using delivery date as exit date
+        });
+        return transferOrder.save();
+      })
+    );
 
     res.json({ 
       success: true, 
       purchaseOrder,
-      transferOrder 
+      transferOrders 
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -283,7 +288,7 @@ router.get("/supplier/get-all-suppliers", protect, async (req, res) => {
 router.get("/items-status", protect, async (req, res) => {
   try {
     const purchaseOrders = await PurchaseOrder.find()
-      .populate("supplier", "supplierName")
+      .populate("items.supplier", "supplierName")
       .populate("materialRequestNo", "siteId")
       .lean();
 
@@ -310,7 +315,7 @@ router.get("/items-status", protect, async (req, res) => {
         return po.items.map((item) => ({
           purchaseOrderId: po._id,
           purchaseOrderNo: po.purchaseOrderNo,
-          supplier: { supplierName: po.supplier?.supplierName || "" },
+          supplier: { supplierName: item.supplier?.supplierName || "" },
           site: siteInfo || { _id: null, siteName: "Unknown", type: "Unknown" },
           deliveryDate: po.deliveryDate,
           createdAt: po.createdAt,
@@ -347,7 +352,7 @@ router.get("/items-status/:siteId", protect, async (req, res) => {
     const purchaseOrders = await PurchaseOrder.find({
       materialRequestNo: { $in: materialRequestNos },
     })
-      .populate("supplier", "supplierName")
+      .populate("items.supplier", "supplierName")
       .lean();
 
     const items = await Promise.all(
@@ -373,7 +378,7 @@ router.get("/items-status/:siteId", protect, async (req, res) => {
         return po.items.map((item) => ({
           purchaseOrderId: po._id,
           purchaseOrderNo: po.purchaseOrderNo,
-          supplier: { supplierName: po.supplier?.supplierName || "" },
+          supplier: { supplierName: item.supplier?.supplierName || "" },
           site: siteInfo || { _id: null, siteName: "Unknown", type: "Unknown" },
           deliveryDate: po.deliveryDate,
           createdAt: po.createdAt,

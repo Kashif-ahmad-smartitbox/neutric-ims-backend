@@ -112,6 +112,11 @@ const materialInwardSchema = new mongoose.Schema(
           required: [true, "Pending quantity is required"],
           min: 0,
         },
+        supplier: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Supplier",
+          required: false, // Optional for backward compatibility
+        },
       },
     ],
     pdfLink: {

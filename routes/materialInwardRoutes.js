@@ -12,6 +12,7 @@ const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 router.get("/get-all", protect, async (req, res) => {
   try {
     const grns = await MaterialInward.find()
+      .populate("items.supplier", "supplierName address state gstin email")
       .sort({ createdAt: -1 })
       .lean();
     res.json({ success: true, grns });
@@ -344,23 +345,25 @@ router.get("/suppliers/supplied", protect, async (req, res) => {
   try {
     // Check if user is center store incharge
     if (req.user.role === "center store incharge") {
-      // Get suppliers from pending purchase orders
+      // Get suppliers from pending purchase orders (now per-item)
       const pendingPurchaseOrders = await PurchaseOrder.find({ 
-        status: "Pending" 
+        status: { $in: ["Pending", "partially received"] }
       })
-        .populate("supplier", "supplierName _id")
-        .select("supplier")
+        .populate("items.supplier", "supplierName _id")
+        .select("items.supplier")
         .lean();
       
-      // Extract unique suppliers
+      // Extract unique suppliers from items
       const supplierMap = new Map();
       pendingPurchaseOrders.forEach(po => {
-        if (po.supplier && po.supplier._id) {
-          supplierMap.set(po.supplier._id.toString(), {
-            _id: po.supplier._id,
-            supplierName: po.supplier.supplierName
-          });
-        }
+        po.items.forEach(item => {
+          if (item.supplier && item.supplier._id) {
+            supplierMap.set(item.supplier._id.toString(), {
+              _id: item.supplier._id,
+              supplierName: item.supplier.supplierName
+            });
+          }
+        });
       });
       
       const suppliers = Array.from(supplierMap.values());
@@ -414,7 +417,7 @@ router.get("/suppliers/:supplierId/pending-pos", protect, async (req, res) => {
         .json({ success: false, message: "Invalid supplier ID" });
     }
     const purchaseOrders = await PurchaseOrder.find({
-      supplier: supplierId,
+      "items.supplier": supplierId,
       status: { $in: ["Pending", "partially received"] },
     })
       .select("purchaseOrderNo")
@@ -468,6 +471,7 @@ router.get("/purchase-order/get/:purchaseOrderNo", protect, async (req, res) => 
   try {
     const { purchaseOrderNo } = req.params;
     const purchaseOrder = await PurchaseOrder.findOne({ purchaseOrderNo })
+      .populate("items.supplier", "supplierName _id")
       .lean();
     if (!purchaseOrder) {
       return res
@@ -490,6 +494,7 @@ router.get("/purchase-order/get/:purchaseOrderNo", protect, async (req, res) => 
         receivedQty: item.receivedQty,
         pendingQty: item.pendingQty,
         status: item.status,
+        supplier: item.supplier,
       })),
     };
     res.json({ success: true, purchaseOrder: po });
