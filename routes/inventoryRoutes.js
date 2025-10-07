@@ -4,7 +4,7 @@ const siteInventoryModel = require("../models/SiteInventory");
 const MaterialRequestModel = require("../models/MaterialRequest");
 const MaterialIssueModel = require("../models/MaterialIssue");
 const SiteModel = require("../models/Site");
-
+// const InventoryModel = require("../models/Inventory");
 const ItemsModel = require("../models/Item");
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
@@ -41,14 +41,14 @@ router.post("/add-opening-stock", protect, async (req, res) => {
         { new: true, upsert: true }
       );
 
-      await InventoryModel.findOneAndUpdate(
-        { itemId },
-        { 
-          $inc: { open: open, inHand: open },
-          $setOnInsert: { itemId } 
-        },
-        { new: true, upsert: true }
-      );
+      // await InventoryModel.findOneAndUpdate(
+      //   { itemId },
+      //   { 
+      //     $inc: { open: open, inHand: open },
+      //     $setOnInsert: { itemId } 
+      //   },
+      //   { new: true, upsert: true }
+      // );
 
       results.push({
         itemId,
@@ -616,6 +616,45 @@ router.get('/get-composed-inventory', protect, authorizeRoles('admin', 'center s
     res.status(500).json({
       success: false,
       message: error.message || "Internal server error"
+    });
+  }
+});
+
+// Recalculate inHand for all SiteInventory records
+router.post("/recalculate-inhand", protect, async (req, res) => {
+  try {
+    const SiteInventoryModel = require("../models/SiteInventory");
+    
+    // Get all site inventory records
+    const siteInventories = await SiteInventoryModel.find({});
+    
+    let updatedCount = 0;
+    
+    // Update each record
+    for (const inventory of siteInventories) {
+      const newInHand = Math.max(0, inventory.open - (inventory.issuedQuantity || 0));
+      
+      if (inventory.inHand !== newInHand) {
+        await SiteInventoryModel.findByIdAndUpdate(
+          inventory._id,
+          { inHand: newInHand },
+          { new: true }
+        );
+        updatedCount++;
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Successfully recalculated inHand for ${updatedCount} records`,
+      updatedCount,
+      totalRecords: siteInventories.length
+    });
+  } catch (error) {
+    console.error("Error recalculating inHand:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error recalculating inHand values"
     });
   }
 });

@@ -57,15 +57,14 @@ function docTransform(doc, ret) {
 }
 
 
+// Virtual field to always calculate inHand dynamically
+siteinventorySchema.virtual('calculatedInHand').get(function() {
+  return Math.max(0, this.open - (this.issuedQuantity || 0));
+});
+
 siteinventorySchema.pre("save", async function (next) {
-  if (this.isNew) {
-    this.inHand = this.open;
-  } else {
-    const existing = await mongoose.model("SiteInventory").findById(this._id); // corrected model name
-    if (existing) {
-      this.inHand = existing.inHand + this.open;
-    }
-  }
+  // Always calculate inHand as open - issuedQuantity
+  this.inHand = Math.max(0, this.open - (this.issuedQuantity || 0));
   next();
 });
 

@@ -3,6 +3,7 @@ const router = express.Router();
 const MaterialIssueModel = require("../models/MaterialIssue");
 const MaterialRequestModel = require("../models/MaterialRequest");
 const SiteInventoryModel = require("../models/SiteInventory");
+const InventoryModel = require("../models/Inventotry");
 const ItemModel = require("../models/Item");
 const TransferOrderModel = require("../models/TransferOrder");
 const { protect } = require("../middleware/authMiddleware");
@@ -69,12 +70,30 @@ router.post("/createFromCentralWarehouse", protect, async (req, res) => {
       }
 
       const newPending = reqItem.requestQuantity - i.issueQty;
+      const newRequestQuantity = Math.max(0, reqItem.requestQuantity - i.issueQty);
 
       await SiteInventoryModel.findOneAndUpdate(
         { itemId: i._id, siteId: null }, // Update central warehouse inventory
         {
           $set: {
             issuedQuantity: (reqItem.issuedQuantity || 0) + i.issueQty,
+            requestQuantity: newRequestQuantity,
+            pending: newPending < 0 ? 0 : newPending,
+          },
+          $inc: {
+            inHand: -i.issueQty,
+          },
+        },
+        { new: true }
+      );
+
+      // Also update main inventory model
+      await InventoryModel.findOneAndUpdate(
+        { itemId: i._id },
+        {
+          $set: {
+            issuedQuantity: (reqItem.issuedQuantity || 0) + i.issueQty,
+            requestQuantity: newRequestQuantity,
             pending: newPending < 0 ? 0 : newPending,
           },
           $inc: {
@@ -141,12 +160,20 @@ router.post("/create", protect, async (req, res) => {
       
       destination,
     } = req.body;
-    const { _id: userId, site: siteId } = req.user;
+    const { _id: userId, site: siteId, role } = req.user;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res
         .status(400)
         .json({ success: false, message: "Items are required" });
+    }
+
+    // Validate that site store incharge can only issue to their own site
+    if (role === "site store incharge" && issuedTo.toString() !== siteId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Site store incharge can only issue materials to their own site.",
+      });
     }
 
     const formattedItems = items.map((i) => ({
@@ -187,12 +214,30 @@ router.post("/create", protect, async (req, res) => {
       }
 
       const newPending = reqItem.requestQuantity - i.issueQty;
+      const newRequestQuantity = Math.max(0, reqItem.requestQuantity - i.issueQty);
 
       await SiteInventoryModel.findOneAndUpdate(
         { itemId: i._id, siteId: req.user.site },
         {
           $set: {
             issuedQuantity: (reqItem.issuedQuantity || 0) + i.issueQty,
+            requestQuantity: newRequestQuantity,
+            pending: newPending < 0 ? 0 : newPending,
+          },
+          $inc: {
+            inHand: -i.issueQty,
+          },
+        },
+        { new: true }
+      );
+
+      // Also update main inventory model
+      await InventoryModel.findOneAndUpdate(
+        { itemId: i._id },
+        {
+          $set: {
+            issuedQuantity: (reqItem.issuedQuantity || 0) + i.issueQty,
+            requestQuantity: newRequestQuantity,
             pending: newPending < 0 ? 0 : newPending,
           },
           $inc: {

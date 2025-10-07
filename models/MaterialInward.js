@@ -124,6 +124,19 @@ const materialInwardSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    isReceived: {
+      type: Boolean,
+      default: false,
+    },
+    receivedAt: {
+      type: Date,
+      default: null,
+    },
+    receivedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   { timestamps: true }
 );

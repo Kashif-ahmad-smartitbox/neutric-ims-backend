@@ -632,4 +632,65 @@ async function revertPurchaseOrderOnGRN(purchaseOrderNo, grnItems) {
   }
 }
 
+// Update GRN received status
+router.put("/update/:grnId", protect, async (req, res) => {
+  try {
+    const { grnId } = req.params;
+    const { isReceived, invoiceNo, invoiceDate, subType } = req.body;
+    const { _id: userId } = req.user;
+
+    // Validate GRN ID
+    if (!mongoose.Types.ObjectId.isValid(grnId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid GRN ID",
+      });
+    }
+
+    // Find the GRN
+    const grn = await MaterialInward.findById(grnId);
+    if (!grn) {
+      return res.status(404).json({
+        success: false,
+        message: "GRN not found",
+      });
+    }
+
+    // Prepare update data
+    const updateData = {
+      isReceived,
+      receivedAt: isReceived ? new Date() : null,
+      receivedBy: isReceived ? userId : null,
+    };
+
+    // If updating to received and it's a Supplied Challan type, update invoice details
+    if (isReceived && grn.type === "Supplied" && grn.subType === "Challan") {
+      if (invoiceNo && invoiceDate) {
+        updateData.invoiceNo = invoiceNo;
+        updateData.invoiceDate = new Date(invoiceDate);
+        updateData.subType = subType || "Invoice";
+      }
+    }
+
+    // Update the GRN
+    const updatedGrn = await MaterialInward.findByIdAndUpdate(
+      grnId,
+      updateData,
+      { new: true }
+    );
+
+    res.json({
+      success: true,
+      message: `GRN ${isReceived ? "marked as received" : "marked as pending"}`,
+      data: updatedGrn,
+    });
+  } catch (error) {
+    console.error("Error updating GRN status:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+});
+
 module.exports = router;
