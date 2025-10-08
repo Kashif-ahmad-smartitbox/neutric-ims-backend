@@ -175,29 +175,84 @@ router.get("/get-all", protect, async (req, res) => {
   }
 });
 
-router.put("/update/:id", async (req, res) => {
+router.put("/update/:id", protect, async (req, res) => {
   try {
     const { id } = req.params;
+    const { status } = req.body;
 
-    let { requestedBy, siteId, items, status } = req.body;
-
-    if (items && Array.isArray(items)) {
-      items = items.map((item) => ({
-        ...item,
-        requestedQty: Number(item.requestedQty),
-      }));
-    }
-
-    const updatedRequest = await MaterialRequestModel.findByIdAndUpdate(
-      id,
-      { requestedBy, siteId, items, status },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedRequest) {
+    // Get the original request
+    const originalRequest = await MaterialRequestModel.findById(id).populate('requestedBy', 'role');
+    
+    if (!originalRequest) {
       return res
         .status(404)
         .json({ success: false, message: "Material request not found" });
+    }
+
+    console.log('Approval Debug:', {
+      status,
+      approverRole: req.user.role,
+      originalRole: originalRequest.requestedBy.role,
+      isCenterStoreInchargeApproving: req.user.role === "center store incharge"
+    });
+
+    // Only update the status, keep other fields unchanged
+    const updatedRequest = await MaterialRequestModel.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true, runValidators: true }
+    );
+
+    // If the request is being approved by a center store incharge,
+    // we need to transfer the mip quantities to requestQuantity
+    if (status === "approved" && req.user.role === "center store incharge") {
+      console.log('Executing center store incharge approval logic...');
+      
+      // Get the updated request with populated data
+      const approvedRequest = await MaterialRequestModel.findById(id)
+        .populate('requestedBy', 'role')
+        .populate('siteId', '_id');
+
+      console.log('Approved request items:', approvedRequest.items);
+
+      if (approvedRequest && approvedRequest.items) {
+        for (const item of approvedRequest.items) {
+          const itemId = item._id;
+          const requestedQty = item.requestedQty;
+          // Center store incharge has siteId: null in their inventory records
+          const siteId = null;
+
+          console.log('Processing item:', { itemId, requestedQty, siteId });
+
+          // Update siteInventory: transfer mip to requestQuantity for center store incharge (siteId: null)
+          const siteInventoryResult = await siteInventoryModel.findOneAndUpdate(
+            { itemId, siteId: null },
+            {
+              $inc: { 
+                requestQuantity: requestedQty,
+                mip: -requestedQty
+              }
+            },
+            { new: true }
+          );
+
+          console.log('Site inventory update result:', siteInventoryResult);
+
+          // Update main Inventory: transfer mip to requestQuantity
+          const inventoryResult = await InventoryModel.findOneAndUpdate(
+            { itemId },
+            {
+              $inc: { 
+                requestQuantity: requestedQty,
+                mip: -requestedQty
+              }
+            },
+            { new: true }
+          );
+
+          console.log('Main inventory update result:', inventoryResult);
+        }
+      }
     }
 
     res.status(200).json({ success: true, data: updatedRequest });
