@@ -132,7 +132,7 @@ const materialInwardSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    receivedBy: {
+    receivedByUserId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,

@@ -23,6 +23,8 @@ router.post("/createFromCentralWarehouse", protect, async (req, res) => {
     } = req.body;
     const { _id: userId } = req.user;
 
+
+
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res
         .status(400)
@@ -35,16 +37,17 @@ router.post("/createFromCentralWarehouse", protect, async (req, res) => {
     }));
 
     const materialIssueNumber = await generateMaterialIssueNumber();
+    let transferNoGen = await generateTransferNo();
     const newIssue = new MaterialIssueModel({
       items: formattedItems,
       materialIssueNumber,
       issuedBy: userId,
       issuedTo,
       shipmentDetails: {
-        transferNo,
+        transferNo: transferNoGen,
         vehicleNo,
         dateAndExitTime: exitDateTime,
-        destination: destination.siteName,
+        destination: destination?.siteName || destination?.name || "Unknown Destination",
       },
     });
 
@@ -62,23 +65,35 @@ router.post("/createFromCentralWarehouse", protect, async (req, res) => {
         });
       }
 
-      if (reqItem.inHand < i.issueQty) {
-        return res.status(400).json({
-          success: false,
-          message: `Not enough stock for item ${reqItem.itemId}, available: ${reqItem.inHand}`,
-        });
-      }
+const inHand = await SiteInventoryModel.findOne({
+  itemId: i._id,
+  siteId: null,
+});
+;
+    
+     if(i.issueQty > inHand.inHand){
+      return res.status(400).json({
+        success: false,
+        message: `Not enough stock for item ${reqItem.itemId}, available: ${reqItem.inHand}`,
+      });
+     }
 
-      const newPending = reqItem.requestQuantity - i.issueQty;
       const newRequestQuantity = Math.max(0, reqItem.requestQuantity - i.issueQty);
+      const newIssuedQuantity = (reqItem.issuedQuantity || 0) + i.issueQty;
+      const newInHand = reqItem.inHand - i.issueQty;
+      const newPending = newRequestQuantity - newIssuedQuantity - newInHand;
+
+    
+
+     
 
       await SiteInventoryModel.findOneAndUpdate(
         { itemId: i._id, siteId: null }, // Update central warehouse inventory
         {
           $set: {
-            issuedQuantity: (reqItem.issuedQuantity || 0) + i.issueQty,
+            issuedQuantity: newIssuedQuantity,
             requestQuantity: newRequestQuantity,
-            pending: newPending < 0 ? 0 : newPending,
+            pending: Math.max(0, newPending), // Ensure pending doesn't go negative
           },
           $inc: {
             inHand: -i.issueQty,
@@ -87,14 +102,14 @@ router.post("/createFromCentralWarehouse", protect, async (req, res) => {
         { new: true }
       );
 
-      // Also update main inventory model
+      // Also update main inventory model (center store inventory)
       await InventoryModel.findOneAndUpdate(
-        { itemId: i._id },
+        { itemId: i._id, siteId: null }, // Ensure we update center store inventory
         {
           $set: {
-            issuedQuantity: (reqItem.issuedQuantity || 0) + i.issueQty,
+            issuedQuantity: newIssuedQuantity,
             requestQuantity: newRequestQuantity,
-            pending: newPending < 0 ? 0 : newPending,
+            pending: Math.max(0, newPending), // Ensure pending doesn't go negative
           },
           $inc: {
             inHand: -i.issueQty,
@@ -114,14 +129,14 @@ router.post("/createFromCentralWarehouse", protect, async (req, res) => {
       }
 
       let type = "Transferred";
-      let transferNoGen = await generateTransferNo();
+    
 
       const newOrder = new TransferOrderModel({
         transferNo: transferNoGen,
         materialIssueNo: materialIssueNumber,
         type,
         vehicleNumber: vehicleNo,
-        from: req.body.issuedFrom.siteName, // Use string directly for central warehouse
+        from: null, // Central Warehouse doesn't have a site ID, set to null
         to: destination._id,
         requestedBy: req.user._id,
         requestedTo: destination._id,
@@ -132,8 +147,11 @@ router.post("/createFromCentralWarehouse", protect, async (req, res) => {
 
       newIssue.transferOrderId = savedOrder._id;
       await newIssue.save();
+      
+      
     }
 
+   
     res.status(201).json({
       success: true,
       message: "Material Issue from Central Warehouse created successfully",

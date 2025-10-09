@@ -5,7 +5,6 @@ const inventorySchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Item",
     required: true,
-    unique: true,
   },
   open: {
     type: Number,
@@ -42,15 +41,12 @@ const inventorySchema = new mongoose.Schema({
    
 }, { timestamps: true });
 
+// Compound unique index on itemId and siteId to allow same item across different sites
+inventorySchema.index({ itemId: 1, siteId: 1 }, { unique: true });
+
 inventorySchema.pre("save", async function (next) {
-  if (this.isNew) {
-    this.inHand = this.open;
-  } else {
-    const existing = await mongoose.model("inventory").findById(this._id);
-    if (existing) {
-      this.inHand = existing.inHand + this.open; // Add open to inHand
-    }
-  }
+  // Always calculate inHand as open - issuedQuantity
+  this.inHand = Math.max(0, this.open - (this.issuedQuantity || 0));
   next();
 });
 

@@ -11,9 +11,10 @@ const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
 router.post("/create", protect, async (req, res) => {
   try {
-    let { siteId, items } = req.body;
+    let { siteId, items, source } = req.body;
 
-    siteId = req.user.site;
+    // For center store incharge, use null as siteId for their inventory records
+    siteId = req.user.role === "center store incharge" ? null : req.user.site;
 
     let materialRequestNo = await generateMaterialRequestNo();
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -54,20 +55,25 @@ router.post("/create", protect, async (req, res) => {
       siteId,
       requestedTo,
       items,
+      source: source || 'unknown', // Add source information
     });
 
     for (const item of items) {
       const  { _id : itemId, requestedQty } = item;
 
       
-      // Check if the requester is center store incharge
+      // Check if the requester is site store incharge or center store incharge
+      const isSiteStoreIncharge = req.user.role === "site store incharge";
       const isCenterStoreIncharge = req.user.role === "center store incharge";
+      const shouldUseMip = isSiteStoreIncharge || isCenterStoreIncharge;
+      
+      // For site store incharge: subtract from requestQuantity, add to mip
+      // For center store incharge: subtract from mip, add to mip (net effect: transfer)
+      // For others: just add to requestQuantity
       
       // Prepare the update object for siteInventory
       const siteInventoryUpdate = {
-        $inc: isCenterStoreIncharge 
-          ? { mip: requestedQty }
-          : { requestQuantity: requestedQty },
+        $inc: {},
         $setOnInsert: {
           open: 0,
           issuedQuantity: 0,
@@ -75,9 +81,24 @@ router.post("/create", protect, async (req, res) => {
         },
       };
       
-      // Only set mip to 0 on insert if it's not a center store incharge
-      if (!isCenterStoreIncharge) {
-        siteInventoryUpdate.$setOnInsert.mip = 0;
+      if (isSiteStoreIncharge) {
+        // Site store incharge: subtract from requestQuantity, add to mip
+        if(source === "inventory-page"){
+          siteInventoryUpdate.$inc.requestQuantity = -requestedQty;
+          siteInventoryUpdate.$inc.mip = requestedQty;
+        }else{
+          siteInventoryUpdate.$inc.mip = requestedQty;
+        }
+      } else if (isCenterStoreIncharge) {
+        // Center store incharge: subtract from existing mip quantities
+        siteInventoryUpdate.$inc.requestQuantity = -requestedQty;
+        siteInventoryUpdate.$inc.mip = requestedQty;
+        console.log('Center Store Incharge - SiteInventory Update:', { itemId, requestedQty, siteId, update: siteInventoryUpdate });
+        // Note: The new request will have its own mip quantities that will be handled when approved
+      } else {
+        // Others (junior site engineer): just add to requestQuantity
+        // siteInventoryUpdate.$inc.requestQuantity = requestedQty;
+        // siteInventoryUpdate.$setOnInsert.mip = 0;
       }
 
       await siteInventoryModel.findOneAndUpdate(
@@ -88,9 +109,7 @@ router.post("/create", protect, async (req, res) => {
 
       // Prepare the update object for Inventory
       const inventoryUpdate = {
-        $inc: isCenterStoreIncharge 
-          ? { mip: requestedQty }
-          : { requestQuantity: requestedQty },
+        $inc: {},
         $setOnInsert: {
           open: 0,
           issuedQuantity: 0,
@@ -99,9 +118,25 @@ router.post("/create", protect, async (req, res) => {
         },
       };
       
-      // Only set mip to 0 on insert if it's not a center store incharge
-      if (!isCenterStoreIncharge) {
-        inventoryUpdate.$setOnInsert.mip = 0;
+      if (isSiteStoreIncharge) {
+        // Site store incharge: subtract from requestQuantity, add to mip
+        if(source === "inventory-page"){
+          inventoryUpdate.$inc.requestQuantity = -requestedQty;
+          inventoryUpdate.$inc.mip = requestedQty;
+        }else{
+          inventoryUpdate.$inc.mip = requestedQty;
+        }
+        
+      } else if (isCenterStoreIncharge) {
+        // Center store incharge: subtract from existing mip quantities
+        inventoryUpdate.$inc.requestQuantity = -requestedQty;
+        inventoryUpdate.$inc.mip = requestedQty;
+        console.log('Center Store Incharge - Main Inventory Update:', { itemId, requestedQty, update: inventoryUpdate });
+        // Note: The new request will have its own mip quantities that will be handled when approved
+      } else {
+        // // Others (junior site engineer): just add to requestQuantity
+        // inventoryUpdate.$inc.requestQuantity = requestedQty;
+        // inventoryUpdate.$setOnInsert.mip = 0;
       }
 
       await InventoryModel.findOneAndUpdate(
@@ -189,12 +224,7 @@ router.put("/update/:id", protect, async (req, res) => {
         .json({ success: false, message: "Material request not found" });
     }
 
-    console.log('Approval Debug:', {
-      status,
-      approverRole: req.user.role,
-      originalRole: originalRequest.requestedBy.role,
-      isCenterStoreInchargeApproving: req.user.role === "center store incharge"
-    });
+
 
     // Only update the status, keep other fields unchanged
     const updatedRequest = await MaterialRequestModel.findByIdAndUpdate(
@@ -203,10 +233,10 @@ router.put("/update/:id", protect, async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    // If the request is being approved by a center store incharge,
+    // If the request is being approved by a site store incharge or center store incharge,
     // we need to transfer the mip quantities to requestQuantity
-    if (status === "approved" && req.user.role === "center store incharge") {
-      console.log('Executing center store incharge approval logic...');
+    if (status === "approved" && (req.user.role === "site store incharge" || req.user.role === "center store incharge")) {
+
       
       // Get the updated request with populated data
       const approvedRequest = await MaterialRequestModel.findById(id)
@@ -219,24 +249,30 @@ router.put("/update/:id", protect, async (req, res) => {
         for (const item of approvedRequest.items) {
           const itemId = item._id;
           const requestedQty = item.requestedQty;
-          // Center store incharge has siteId: null in their inventory records
-          const siteId = null;
+          
+          // Determine siteId based on approver role
+          let siteId;
+          if (req.user.role === "center store incharge") {
+            siteId = null; // Center store incharge has siteId: null in their inventory records
+          } else if (req.user.role === "site store incharge") {
+            siteId = approvedRequest.siteId._id; // Site store incharge uses the request's siteId
+          }
 
-          console.log('Processing item:', { itemId, requestedQty, siteId });
+         
 
-          // Update siteInventory: transfer mip to requestQuantity for center store incharge (siteId: null)
+          // Update siteInventory: transfer mip to requestQuantity
           const siteInventoryResult = await siteInventoryModel.findOneAndUpdate(
-            { itemId, siteId: null },
+            { itemId, siteId },
             {
               $inc: { 
                 requestQuantity: requestedQty,
-                mip: -requestedQty
+               
               }
             },
             { new: true }
           );
 
-          console.log('Site inventory update result:', siteInventoryResult);
+    
 
           // Update main Inventory: transfer mip to requestQuantity
           const inventoryResult = await InventoryModel.findOneAndUpdate(
@@ -244,13 +280,13 @@ router.put("/update/:id", protect, async (req, res) => {
             {
               $inc: { 
                 requestQuantity: requestedQty,
-                mip: -requestedQty
+                
               }
             },
             { new: true }
           );
 
-          console.log('Main inventory update result:', inventoryResult);
+          
         }
       }
     }

@@ -35,6 +35,12 @@ const materialRequestSchema = new mongoose.Schema(
       enum: ["pending", "approved"],
       default: "pending",
     },
+    
+    source: {
+      type: String,
+      enum: ["material-request-page", "inventory-page", "unknown"],
+      default: "unknown",
+    },
   },
   { timestamps: true }
 );

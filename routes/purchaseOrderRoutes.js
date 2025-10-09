@@ -223,7 +223,7 @@ router.post("/delete", protect, async (req, res) => {
       _id: { $in: purchaseOrderIds },
     });
     for (const po of purchaseOrders) {
-      if (po.status === "Approved" || po.status === "Closed") {
+      if (po.status !== "Pending") {
         return res
           .status(400)
           .json({ success: false, message: "Cannot delete approved or closed purchase orders" });

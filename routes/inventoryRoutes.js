@@ -89,7 +89,7 @@ router.get("/get-all-inventory", protect, async (req, res) => {
 
     // Calculate pending quantity for each inventory item
     const inventoriesWithPending = siteInventories.map(inventory => {
-      const pending = Math.max(0, inventory.requestQuantity - inventory.inHand);
+      const pending = Math.max(0, inventory.requestQuantity - inventory.issuedQuantity - inventory.inHand);
       return {
         ...inventory.toObject(),
         pending: pending

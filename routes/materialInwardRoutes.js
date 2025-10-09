@@ -6,6 +6,9 @@ const Site = require("../models/Site");
 const MaterialIssue = require("../models/MaterialIssue");
 const PurchaseOrder = require("../models/purchaseOrder");
 const Supplier = require("../models/Supplier");
+const Inventory = require("../models/Inventotry");
+const siteInventoryModel = require("../models/SiteInventory");
+const Item = require("../models/Item");
 const { protect, authorizeRoles } = require("../middleware/authMiddleware");
 
 // Get all GRNs
@@ -151,7 +154,8 @@ router.post("/create", protect, async (req, res) => {
       challanDate,
       invoiceNo,
       invoiceDate,
-      receivedBy,
+      receivedBy, // This is the person's name (string)
+      receivedByUserId: req.user._id, // This is the user ID (ObjectId)
       supplierId,
       supplierName,
       items,
@@ -163,6 +167,11 @@ router.post("/create", protect, async (req, res) => {
     // Update Purchase Order if this is a Supplied GRN
     if (type === "Supplied" && purchaseOrderNo) {
       await updatePurchaseOrderOnGRN(purchaseOrderNo, items);
+    }
+
+    // Update inventory when center store incharge creates GRN
+    if (req.user.role === "center store incharge") {
+      await updateInventoryOnGRN(items);
     }
 
     res.json({ success: true, message: "GRN created successfully" });
@@ -217,7 +226,8 @@ router.post("/update", protect, async (req, res) => {
           .json({ success: false, message: "Invalid item data" });
       }
     }
-
+      // Get the old GRN to calculate net change in quantities
+      const oldGrn = await MaterialInward.findOne({ grnNo });
     // Validate supplier and MI/PO
     if (type === "Transferred" && (!materialIssueNo || !supplierId)) {
       return res
@@ -249,8 +259,7 @@ router.post("/update", protect, async (req, res) => {
           .json({ success: false, message: "Purchase Order not found" });
       }
 
-      // Get the old GRN to calculate net change in quantities
-      const oldGrn = await MaterialInward.findOne({ grnNo });
+
       
       // Check if GRN quantities exceed available PO quantities
       for (const grnItem of items) {
@@ -292,7 +301,8 @@ router.post("/update", protect, async (req, res) => {
         challanDate,
         invoiceNo,
         invoiceDate,
-        receivedBy,
+        receivedBy, // This is the person's name (string)
+        receivedByUserId: req.user._id, // This is the user ID (ObjectId)
         supplierId,
         supplierName,
         items,
@@ -318,6 +328,16 @@ router.post("/update", protect, async (req, res) => {
     } else if (oldGrn && oldGrn.type === "Supplied" && oldGrn.purchaseOrderNo) {
       // If changing from Supplied to non-Supplied, revert the old PO
       await revertPurchaseOrderOnGRN(oldGrn.purchaseOrderNo, oldGrn.items);
+    }
+
+    // Update inventory when center store incharge updates GRN
+    if (req.user.role === "center store incharge") {
+      // If there was an old GRN, revert its inventory changes first
+      if (oldGrn) {
+        await revertInventoryOnGRN(oldGrn.items);
+      }
+      // Apply new inventory changes
+      await updateInventoryOnGRN(items);
     }
 
     res.json({ success: true, message: "GRN updated successfully" });
@@ -522,6 +542,11 @@ router.delete("/delete/:grnNo", protect, async (req, res) => {
       await revertPurchaseOrderOnGRN(grn.purchaseOrderNo, grn.items);
     }
 
+    // Revert inventory changes if center store incharge created this GRN
+    if (req.user.role === "center store incharge") {
+      await revertInventoryOnGRN(grn.items);
+    }
+
     // Delete the GRN
     await MaterialInward.findOneAndDelete({ grnNo });
     
@@ -660,7 +685,7 @@ router.put("/update/:grnId", protect, async (req, res) => {
     const updateData = {
       isReceived,
       receivedAt: isReceived ? new Date() : null,
-      receivedBy: isReceived ? userId : null,
+      receivedByUserId: isReceived ? userId : null,
     };
 
     // If updating to received and it's a Supplied Challan type, update invoice details
@@ -692,5 +717,79 @@ router.put("/update/:grnId", protect, async (req, res) => {
     });
   }
 });
+
+// Helper function to update inventory when GRN is created/updated
+async function updateInventoryOnGRN(grnItems) {
+  try {
+    for (const grnItem of grnItems) {
+      const { itemCode, receiveQty } = grnItem;
+      
+      // Find the item by itemCode
+      const item = await Item.findOne({ itemCode });
+      if (!item) {
+        console.error(`Item with code ${itemCode} not found`);
+        continue;
+      }
+
+      // Update center store inventory (where siteId is null)
+      await siteInventoryModel.findOneAndUpdate(
+        { itemId: item._id, siteId: null },
+        {
+          $inc: {
+            mip: -receiveQty,  // Subtract from MIP (Material in Pipeline)
+            inHand: receiveQty,  // Add to inHand stock (which affects inHand)
+          }
+        },
+        { 
+          new: true, 
+          upsert: true,
+          setDefaultsOnInsert: true
+        }
+      );
+
+      console.log(`Updated inventory for item ${itemCode}: MIP -${receiveQty}, Open +${receiveQty}`);
+    }
+  } catch (error) {
+    console.error("Error updating inventory on GRN:", error);
+    throw error;
+  }
+}
+
+// Helper function to revert inventory when GRN is updated/deleted
+async function revertInventoryOnGRN(grnItems) {
+  try {
+    for (const grnItem of grnItems) {
+      const { itemCode, receiveQty } = grnItem;
+      
+      // Find the item by itemCode
+      const item = await Item.findOne({ itemCode });
+      if (!item) {
+        console.error(`Item with code ${itemCode} not found`);
+        continue;
+      }
+
+      // Revert center store inventory changes
+      await siteInventoryModel.findOneAndUpdate(
+        { itemId: item._id, siteId: null },
+        {
+          $inc: {
+            mip: receiveQty,   // Add back to MIP
+            inHand: -receiveQty, // Subtract from inHand stock
+          }
+        },
+        { 
+          new: true, 
+          upsert: true,
+          setDefaultsOnInsert: true
+        }
+      );
+
+      console.log(`Reverted inventory for item ${itemCode}: MIP +${receiveQty}, Open -${receiveQty}`);
+    }
+  } catch (error) {
+    console.error("Error reverting inventory on GRN:", error);
+    throw error;
+  }
+}
 
 module.exports = router;
