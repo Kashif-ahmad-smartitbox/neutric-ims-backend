@@ -169,9 +169,19 @@ router.post("/create", protect, async (req, res) => {
       await updatePurchaseOrderOnGRN(purchaseOrderNo, items);
     }
 
+    // Update Material Issue status if this is a Transferred GRN
+    if (type === "Transferred" && materialIssueNo) {
+      await updateMaterialIssueStatusOnGRN(materialIssueNo, items);
+    }
+
     // Update inventory when center store incharge creates GRN
     if (req.user.role === "center store incharge") {
       await updateInventoryOnGRN(items);
+    }
+
+    // Update site inventory when site store incharge creates GRN
+    if (req.user.role === "site store incharge" && req.user.site) {
+      await updateInventoryOnGRN(items, req.user.site);
     }
 
     res.json({ success: true, message: "GRN created successfully" });
@@ -330,6 +340,19 @@ router.post("/update", protect, async (req, res) => {
       await revertPurchaseOrderOnGRN(oldGrn.purchaseOrderNo, oldGrn.items);
     }
 
+    // Update Material Issue status if this is a Transferred GRN
+    if (type === "Transferred" && materialIssueNo) {
+      // If the old GRN was also Transferred and had a different MI, we need to update both
+      if (oldGrn && oldGrn.type === "Transferred" && oldGrn.materialIssueNo && oldGrn.materialIssueNo !== materialIssueNo) {
+        await updateMaterialIssueStatusOnGRN(oldGrn.materialIssueNo, []);
+      }
+      // Update the new Material Issue status
+      await updateMaterialIssueStatusOnGRN(materialIssueNo, items);
+    } else if (oldGrn && oldGrn.type === "Transferred" && oldGrn.materialIssueNo) {
+      // If changing from Transferred to non-Transferred, update the old MI status
+      await updateMaterialIssueStatusOnGRN(oldGrn.materialIssueNo, []);
+    }
+
     // Update inventory when center store incharge updates GRN
     if (req.user.role === "center store incharge") {
       // If there was an old GRN, revert its inventory changes first
@@ -338,6 +361,16 @@ router.post("/update", protect, async (req, res) => {
       }
       // Apply new inventory changes
       await updateInventoryOnGRN(items);
+    }
+
+    // Update site inventory when site store incharge updates GRN
+    if (req.user.role === "site store incharge" && req.user.site) {
+      // If there was an old GRN, revert its site inventory changes first
+      if (oldGrn) {
+        await revertInventoryOnGRN(oldGrn.items, req.user.site);
+      }
+      // Apply new site inventory changes
+      await updateInventoryOnGRN(items, req.user.site);
     }
 
     res.json({ success: true, message: "GRN updated successfully" });
@@ -419,7 +452,45 @@ router.get("/suppliers/:supplierId/pending-mis", protect, async (req, res) => {
     })
       .select("materialIssueNumber")
       .lean();
-    const pendingMIs = materialIssues.map((mi) => mi.materialIssueNumber);
+    
+    // Filter out Material Issues that are fully received
+    const pendingMIs = [];
+    for (const mi of materialIssues) {
+      // Check if any items still have remaining quantity
+      const existingGRNs = await MaterialInward.find({ 
+        materialIssueNo: mi.materialIssueNumber,
+        type: "Transferred" 
+      }).lean();
+      
+      // Get all items from this MI and check if any have remaining quantity
+      const miDetails = await MaterialIssue.findOne({ materialIssueNumber: mi.materialIssueNumber })
+        .populate("items.item", "itemCode")
+        .lean();
+      
+      if (miDetails) {
+        const receivedQuantities = {};
+        existingGRNs.forEach(grn => {
+          grn.items.forEach(item => {
+            if (!receivedQuantities[item.itemCode]) {
+              receivedQuantities[item.itemCode] = 0;
+            }
+            receivedQuantities[item.itemCode] += item.receiveQty;
+          });
+        });
+        
+        // Check if any item has remaining quantity
+        const hasRemainingItems = miDetails.items.some(item => {
+          const itemCode = item.item.itemCode;
+          const totalReceived = receivedQuantities[itemCode] || 0;
+          return item.issueQty - totalReceived > 0;
+        });
+        
+        if (hasRemainingItems) {
+          pendingMIs.push(mi.materialIssueNumber);
+        }
+      }
+    }
+    
     res.json({ success: true, pendingMIs });
   } catch (error) {
     console.error("Error fetching pending MIs:", error);
@@ -440,9 +511,14 @@ router.get("/suppliers/:supplierId/pending-pos", protect, async (req, res) => {
       "items.supplier": supplierId,
       status: { $in: ["Pending", "partially received"] },
     })
-      .select("purchaseOrderNo")
+      .select("purchaseOrderNo items")
       .lean();
-    const pendingPOs = purchaseOrders.map((po) => po.purchaseOrderNo);
+    
+    // Filter POs that have at least one item with pending quantity > 0
+    const pendingPOs = purchaseOrders
+      .filter(po => po.items.some(item => (item.pendingQty || 0) > 0))
+      .map((po) => po.purchaseOrderNo);
+    
     res.json({ success: true, pendingPOs });
   } catch (error) {
     console.error("Error fetching pending POs:", error);
@@ -463,16 +539,55 @@ router.get("/material-issue/get/:materialIssueNo", protect, async (req, res) => 
         .status(404)
         .json({ success: false, message: "Material Issue not found" });
     }
+
+    // Get all GRNs for this Material Issue to calculate received quantities
+    const existingGRNs = await MaterialInward.find({ 
+      materialIssueNo: materialIssueNo,
+      type: "Transferred" 
+    }).lean();
+
+    // Calculate received quantities for each item
+    const receivedQuantities = {};
+    existingGRNs.forEach(grn => {
+      grn.items.forEach(item => {
+        if (!receivedQuantities[item.itemCode]) {
+          receivedQuantities[item.itemCode] = 0;
+        }
+        receivedQuantities[item.itemCode] += item.receiveQty;
+      });
+    });
+
+    // Filter out items that are fully received and calculate remaining quantities
+    const availableItems = materialIssue.items
+      .map((item) => {
+        const itemCode = item.item.itemCode;
+        const totalReceived = receivedQuantities[itemCode] || 0;
+        const remainingQty = item.issueQty - totalReceived;
+        
+        return {
+          itemCode: item.item.itemCode,
+          category: item.item.category,
+          description: item.item.description,
+          uom: item.item.uom,
+          balanceQty: remainingQty,
+          orderQty: item.issueQty,
+          receivedQty: totalReceived,
+        };
+      })
+      .filter(item => item.balanceQty > 0); // Only include items with remaining quantity
+
+    // If no items are available, return appropriate message
+    if (availableItems.length === 0) {
+      return res.json({ 
+        success: true, 
+        issue: { ...materialIssue, items: [] },
+        message: "All items in this Material Issue have been fully received" 
+      });
+    }
+
     const issue = {
       ...materialIssue,
-      items: materialIssue.items.map((item) => ({
-        itemCode: item.item.itemCode,
-        category: item.item.category,
-        description: item.item.description,
-        uom: item.item.uom,
-        balanceQty: item.issueQty,
-        orderQty: item.issueQty,
-      })),
+      items: availableItems,
       transferOrder: {
         transferNo: materialIssue.shipmentDetails?.transferOrderId?.transferNo || materialIssue.shipmentDetails?.transferNo,
         vehicleNo: materialIssue.shipmentDetails?.vehicleNo,
@@ -498,14 +613,27 @@ router.get("/purchase-order/get/:purchaseOrderNo", protect, async (req, res) => 
         .status(404)
         .json({ success: false, message: "Purchase Order not found" });
     }
+    
+    // Filter out items that are fully received (pendingQty <= 0)
+    const availableItems = purchaseOrder.items.filter(item => (item.pendingQty || 0) > 0);
+    
+    // If no items are available, return appropriate message
+    if (availableItems.length === 0) {
+      return res.json({ 
+        success: true, 
+        purchaseOrder: { ...purchaseOrder, items: [] },
+        message: "All items in this Purchase Order have been fully received" 
+      });
+    }
+    
     const po = {
       ...purchaseOrder,
-      items: purchaseOrder.items.map((item) => ({
+      items: availableItems.map((item) => ({
         itemCode: item.itemCode,
         category: item.category,
         description: item.description,
         uom: item.uom,
-        balanceQty: item.purchaseQty,
+        balanceQty: item.pendingQty, // Use pendingQty as balanceQty
         orderQty: item.purchaseQty,
         requestedQty: item.requestedQty,
         price: item.price,
@@ -542,9 +670,19 @@ router.delete("/delete/:grnNo", protect, async (req, res) => {
       await revertPurchaseOrderOnGRN(grn.purchaseOrderNo, grn.items);
     }
 
+    // If it's a Transferred GRN, update the Material Issue status
+    if (grn.type === "Transferred" && grn.materialIssueNo) {
+      await updateMaterialIssueStatusOnGRN(grn.materialIssueNo, []);
+    }
+
     // Revert inventory changes if center store incharge created this GRN
     if (req.user.role === "center store incharge") {
       await revertInventoryOnGRN(grn.items);
+    }
+
+    // Revert site inventory changes if site store incharge created this GRN
+    if (req.user.role === "site store incharge" && req.user.site) {
+      await revertInventoryOnGRN(grn.items, req.user.site);
     }
 
     // Delete the GRN
@@ -603,6 +741,71 @@ async function updatePurchaseOrderOnGRN(purchaseOrderNo, grnItems) {
     console.log(`Purchase Order ${purchaseOrderNo} updated successfully`);
   } catch (error) {
     console.error(`Error updating Purchase Order ${purchaseOrderNo}:`, error);
+    throw error;
+  }
+}
+
+// Helper function to update Material Issue status when GRN is created/updated
+async function updateMaterialIssueStatusOnGRN(materialIssueNo, grnItems) {
+  try {
+    const materialIssue = await MaterialIssue.findOne({ materialIssueNumber: materialIssueNo });
+    if (!materialIssue) {
+      console.error(`Material Issue ${materialIssueNo} not found`);
+      return;
+    }
+
+    // Get all existing GRNs for this Material Issue
+    const existingGRNs = await MaterialInward.find({ 
+      materialIssueNo: materialIssueNo,
+      type: "Transferred" 
+    }).lean();
+
+    // Calculate received quantities for each item
+    const receivedQuantities = {};
+    existingGRNs.forEach(grn => {
+      grn.items.forEach(item => {
+        if (!receivedQuantities[item.itemCode]) {
+          receivedQuantities[item.itemCode] = 0;
+        }
+        receivedQuantities[item.itemCode] += item.receiveQty;
+      });
+    });
+
+    // Check if all items are fully received
+    let allItemsCompleted = true;
+    let anyItemReceived = false;
+
+    for (const miItem of materialIssue.items) {
+      const itemCode = miItem.item.toString();
+      // Get item code from Item model
+      const item = await Item.findById(miItem.item);
+      if (!item) continue;
+      
+      const totalReceived = receivedQuantities[item.itemCode] || 0;
+      const remainingQty = miItem.issueQty - totalReceived;
+      
+      if (totalReceived > 0) {
+        anyItemReceived = true;
+      }
+      
+      if (remainingQty > 0) {
+        allItemsCompleted = false;
+      }
+    }
+
+    // Update Material Issue status
+    if (allItemsCompleted && anyItemReceived) {
+      materialIssue.shipmentDetails.materialInwardStatus = "approved"; // Fully received
+    } else if (anyItemReceived) {
+      materialIssue.shipmentDetails.materialInwardStatus = "partially received";
+    } else {
+      materialIssue.shipmentDetails.materialInwardStatus = "pending";
+    }
+
+    await materialIssue.save();
+    console.log(`Material Issue ${materialIssueNo} status updated to ${materialIssue.shipmentDetails.materialInwardStatus}`);
+  } catch (error) {
+    console.error(`Error updating Material Issue ${materialIssueNo} status:`, error);
     throw error;
   }
 }
@@ -719,7 +922,7 @@ router.put("/update/:grnId", protect, async (req, res) => {
 });
 
 // Helper function to update inventory when GRN is created/updated
-async function updateInventoryOnGRN(grnItems) {
+async function updateInventoryOnGRN(grnItems, siteId = null) {
   try {
     for (const grnItem of grnItems) {
       const { itemCode, receiveQty } = grnItem;
@@ -731,23 +934,41 @@ async function updateInventoryOnGRN(grnItems) {
         continue;
       }
 
-      // Update center store inventory (where siteId is null)
-      await siteInventoryModel.findOneAndUpdate(
-        { itemId: item._id, siteId: null },
-        {
-          $inc: {
-            mip: -receiveQty,  // Subtract from MIP (Material in Pipeline)
-            inHand: receiveQty,  // Add to inHand stock (which affects inHand)
+      if (siteId) {
+        // Update site inventory
+        await siteInventoryModel.findOneAndUpdate(
+          { itemId: item._id, siteId: siteId },
+          {
+            $inc: {
+              inHand: receiveQty,  // Add to inHand stock
+              mip: -receiveQty,
+            }
+          },
+          { 
+            new: true, 
+            upsert: true,
+            setDefaultsOnInsert: true
           }
-        },
-        { 
-          new: true, 
-          upsert: true,
-          setDefaultsOnInsert: true
-        }
-      );
-
-      console.log(`Updated inventory for item ${itemCode}: MIP -${receiveQty}, Open +${receiveQty}`);
+        );
+        console.log(`Updated site inventory for item ${itemCode} at site ${siteId}: inHand +${receiveQty}`);
+      } else {
+        // Update center store inventory (where siteId is null)
+        await siteInventoryModel.findOneAndUpdate(
+          { itemId: item._id, siteId: null },
+          {
+            $inc: {
+              mip: -receiveQty,  // Subtract from MIP (Material in Pipeline)
+              inHand: receiveQty,  // Add to inHand stock (which affects inHand)
+            }
+          },
+          { 
+            new: true, 
+            upsert: true,
+            setDefaultsOnInsert: true
+          }
+        );
+        console.log(`Updated center store inventory for item ${itemCode}: MIP -${receiveQty}, inHand +${receiveQty}`);
+      }
     }
   } catch (error) {
     console.error("Error updating inventory on GRN:", error);
@@ -756,7 +977,7 @@ async function updateInventoryOnGRN(grnItems) {
 }
 
 // Helper function to revert inventory when GRN is updated/deleted
-async function revertInventoryOnGRN(grnItems) {
+async function revertInventoryOnGRN(grnItems, siteId = null) {
   try {
     for (const grnItem of grnItems) {
       const { itemCode, receiveQty } = grnItem;
@@ -768,28 +989,47 @@ async function revertInventoryOnGRN(grnItems) {
         continue;
       }
 
-      // Revert center store inventory changes
-      await siteInventoryModel.findOneAndUpdate(
-        { itemId: item._id, siteId: null },
-        {
-          $inc: {
-            mip: receiveQty,   // Add back to MIP
-            inHand: -receiveQty, // Subtract from inHand stock
+      if (siteId) {
+        // Revert site inventory changes
+        await siteInventoryModel.findOneAndUpdate(
+          { itemId: item._id, siteId: siteId },
+          {
+            $inc: {
+              inHand: -receiveQty, // Subtract from inHand stock
+              mip: receiveQty,
+            }
+          },
+          { 
+            new: true, 
+            upsert: true,
+            setDefaultsOnInsert: true
           }
-        },
-        { 
-          new: true, 
-          upsert: true,
-          setDefaultsOnInsert: true
-        }
-      );
-
-      console.log(`Reverted inventory for item ${itemCode}: MIP +${receiveQty}, Open -${receiveQty}`);
+        );
+        console.log(`Reverted site inventory for item ${itemCode} at site ${siteId}: inHand -${receiveQty}`);
+      } else {
+        // Revert center store inventory changes
+        await siteInventoryModel.findOneAndUpdate(
+          { itemId: item._id, siteId: null },
+          {
+            $inc: {
+              mip: receiveQty,   // Add back to MIP
+              inHand: -receiveQty, // Subtract from inHand stock
+            }
+          },
+          { 
+            new: true, 
+            upsert: true,
+            setDefaultsOnInsert: true
+          }
+        );
+        console.log(`Reverted center store inventory for item ${itemCode}: MIP +${receiveQty}, inHand -${receiveQty}`);
+      }
     }
   } catch (error) {
     console.error("Error reverting inventory on GRN:", error);
     throw error;
   }
 }
+
 
 module.exports = router;
