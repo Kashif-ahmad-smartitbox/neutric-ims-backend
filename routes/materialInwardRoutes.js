@@ -1031,5 +1031,64 @@ async function revertInventoryOnGRN(grnItems, siteId = null) {
   }
 }
 
+// Helper function to update Material Issue status when GRN is created/updated/deleted
+async function updateMaterialIssueStatusOnGRN(materialIssueNo, grnItems) {
+  try {
+    // Find the material issue
+    const materialIssue = await MaterialIssue.findOne({ materialIssueNumber: materialIssueNo });
+    if (!materialIssue) {
+      console.error(`Material Issue ${materialIssueNo} not found`);
+      return;
+    }
+
+    // Get all GRNs for this Material Issue to calculate received quantities
+    const existingGRNs = await MaterialInward.find({ 
+      materialIssueNo: materialIssueNo,
+      type: "Transferred" 
+    }).lean();
+
+    // Calculate received quantities for each item
+    const receivedQuantities = {};
+    existingGRNs.forEach(grn => {
+      grn.items.forEach(item => {
+        if (!receivedQuantities[item.itemCode]) {
+          receivedQuantities[item.itemCode] = 0;
+        }
+        receivedQuantities[item.itemCode] += item.receiveQty;
+      });
+    });
+
+    // Check if all items in the material issue are fully received
+    let allItemsFullyReceived = true;
+    for (const issueItem of materialIssue.items) {
+      const item = await Item.findById(issueItem.item);
+      if (item) {
+        const totalReceived = receivedQuantities[item.itemCode] || 0;
+        const remainingQty = issueItem.issueQty - totalReceived;
+        if (remainingQty > 0) {
+          allItemsFullyReceived = false;
+          break;
+        }
+      }
+    }
+
+    // Update the material issue status based on whether all items are fully received
+    const newStatus = allItemsFullyReceived ? "received" : "pending";
+    
+    await MaterialIssue.findByIdAndUpdate(
+      materialIssue._id,
+      {
+        $set: {
+          "shipmentDetails.status": newStatus
+        }
+      }
+    );
+
+    console.log(`Material Issue ${materialIssueNo} status updated to: ${newStatus}`);
+  } catch (error) {
+    console.error(`Error updating Material Issue ${materialIssueNo} status:`, error);
+    throw error;
+  }
+}
 
 module.exports = router;

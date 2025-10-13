@@ -109,127 +109,6 @@ router.get("/get-all-inventory", protect, async (req, res) => {
   }
 });
 
-// router.get("/get-all-inventory", protect, async (req, res) => {
-//   try {
-//     let baseQuery = {};
-//     if (req.user.role !== "admin") {
-//       baseQuery.siteId = req.user.site;
-//     }
-
-//     const approvedRequests = await MaterialRequestModel.find({
-//       siteId: baseQuery.siteId || { $exists: true },
-//       status: "approved",
-//     });
-
-
-//     const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
-//       reqDoc.items.map((it) => it._id.toString())
-//     );
-
-//     const query = {
-//       ...baseQuery,
-//       $or: [
-//         // { requestQuantity: 0 },
-//         { itemId: { $in: approvedItemIds } },
-//       ],
-//     };
-
-
-//     const siteInventories = await siteInventoryModel
-//       .find(query)
-//       .populate({
-//         path: "itemId",
-//         select: "itemCode description uom category",
-//       })
-//       .sort({ createdAt: -1 });
-
-//     // Calculate pending quantity for each inventory item
-//     const inventoriesWithPending = siteInventories.map(inventory => {
-//       const pending = Math.max(0, inventory.requestQuantity - inventory.issuedQuantity);
-//       return {
-//         ...inventory.toObject(),
-//         pending: pending
-//       };
-//     });
-
-//     res.status(200).json({
-//       success: true,
-//       data: inventoriesWithPending,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching inventory:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message || "Internal server error",
-//     });
-//   }
-// });
-
-// router.patch("/update/:id", async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const { itemId, open, inHand, requestQuantity, issuedQuantity, mip, pending } = req.body;
-
-//     const updateFields = {};
-//     if (itemId !== undefined) updateFields.itemId = itemId;
-//     if (open !== undefined) updateFields.open = open;
-//     if (inHand !== undefined) updateFields.inHand = inHand;
-//     if (requestQuantity !== undefined) updateFields.requestQuantity = requestQuantity;
-//     if (issuedQuantity !== undefined) updateFields.issuedQuantity = issuedQuantity;
-//     if (mip !== undefined) updateFields.mip = mip;
-//     if (pending !== undefined) updateFields.pending = pending;
-
-//     const updatedInventory = await InventoryModel.findByIdAndUpdate(
-//       id,
-//       { $set: updateFields },
-//       { new: true, runValidators: true }
-//     ).populate({
-//       path: "itemId",
-//       select: "itemCode description uom category gst",
-//     });
-
-//     if (!updatedInventory) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Inventory record not found",
-//       });
-//     }
-
-//     res.status(200).json({
-//       success: true,
-//       message: "Inventory updated successfully",
-//       data: updatedInventory,
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       message: error.message || "Internal server error",
-//     });
-//   }
-// });
-
-// router.delete("/delete/:id", async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const deletedInventory = await InventoryModel.findByIdAndDelete(id);
-
-//     if (!deletedInventory) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Inventory record not found",
-//       });
-//     }
-//     res.status(200).json({
-//       success: true,
-//       message: "Inventory record deleted successfully",
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       message: error.message || "Internal server error",
-//     });
-//   }
-// });
 
 
 router.get('/get-all-inHandTotal', async (req, res) => {
@@ -623,10 +502,10 @@ router.get('/get-composed-inventory', protect, authorizeRoles('admin', 'center s
 // Recalculate inHand for all SiteInventory records
 router.post("/recalculate-inhand", protect, async (req, res) => {
   try {
-    const SiteInventoryModel = require("../models/SiteInventory");
+    
     
     // Get all site inventory records
-    const siteInventories = await SiteInventoryModel.find({});
+    const siteInventories = await siteInventoryModel.find({});
     
     let updatedCount = 0;
     
@@ -635,7 +514,7 @@ router.post("/recalculate-inhand", protect, async (req, res) => {
       const newInHand = Math.max(0, inventory.open - (inventory.issuedQuantity || 0));
       
       if (inventory.inHand !== newInHand) {
-        await SiteInventoryModel.findByIdAndUpdate(
+        await siteInventoryModel.findByIdAndUpdate(
           inventory._id,
           { inHand: newInHand },
           { new: true }
@@ -659,4 +538,276 @@ router.post("/recalculate-inhand", protect, async (req, res) => {
   }
 });
 
+
+// Reset and randomly assign inventory data
+router.post("/reset-and-randomize-inventory",protect, async (req, res) => {
+  try {
+    // Only allow admin access
+    
+    if (req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only admin can perform this action.",
+      });
+    }
+
+    // Get all items from the database
+    const allItems = await ItemsModel.find({}).select('_id');
+    
+    if (allItems.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No items found in the database.",
+      });
+    }
+
+    // Get all sites from the database
+    const allSites = await SiteModel.find({}).select('_id');
+    
+    if (allSites.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No sites found in the database.",
+      });
+    }
+
+    // First, reset all existing site inventory data to zero
+    await siteInventoryModel.updateMany(
+      {},
+      {
+        $set: {
+          open: 0,
+          inHand: 0,
+          requestQuantity: 0,
+          issuedQuantity: 0,
+          mip: 0,
+          pending: 0
+        }
+      }
+    );
+
+    console.log("Reset all site inventory data to zero");
+
+    // Randomly assign opening stock quantities to some items at some sites
+    const results = [];
+    const itemsToAssign = Math.floor(allItems.length * 0.6); // Assign to 60% of items
+    const sitesToAssign = Math.floor(allSites.length * 0.8); // Assign to 80% of sites
+
+    // Shuffle arrays to get random selection
+    const shuffledItems = allItems.sort(() => 0.5 - Math.random());
+    const shuffledSites = allSites.sort(() => 0.5 - Math.random());
+
+    // Get random items and sites
+    const selectedItems = shuffledItems.slice(0, itemsToAssign);
+    const selectedSites = shuffledSites.slice(0, sitesToAssign);
+
+    // Assign random quantities
+    for (const item of selectedItems) {
+      for (const site of selectedSites) {
+        // 70% chance to assign quantity to this item-site combination
+        if (Math.random() < 0.7) {
+          // Random quantity between 10 and 200
+          const openingStock = Math.floor(Math.random() * 191) + 10;
+          
+          // Create or update site inventory
+          const siteInventory = await siteInventoryModel.findOneAndUpdate(
+            { itemId: item._id, siteId: site._id },
+            {
+              $set: {
+                open: openingStock,
+                inHand: openingStock, // Same as opening stock
+                requestQuantity: 0,
+                issuedQuantity: 0,
+                mip: 0,
+                pending: 0
+              }
+            },
+            { 
+              new: true, 
+              upsert: true,
+              setDefaultsOnInsert: true
+            }
+          );
+
+          results.push({
+            itemId: item._id,
+            siteId: site._id,
+            openingStock: openingStock,
+            inHand: openingStock
+          });
+        }
+      }
+    }
+
+    // Get total counts
+    const totalRecords = await siteInventoryModel.countDocuments();
+    const recordsWithStock = await siteInventoryModel.countDocuments({
+      open: { $gt: 0 }
+    });
+
+    console.log(`Randomized inventory data: ${results.length} assignments made`);
+    console.log(`Total records: ${totalRecords}, Records with stock: ${recordsWithStock}`);
+
+    res.status(200).json({
+      success: true,
+      message: "Inventory data reset and randomized successfully",
+      data: {
+        totalItems: allItems.length,
+        totalSites: allSites.length,
+        assignmentsMade: results.length,
+        totalRecords: totalRecords,
+        recordsWithStock: recordsWithStock,
+        assignments: results
+      }
+    });
+
+  } catch (error) {
+    console.error("Error resetting and randomizing inventory:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+});
+
 module.exports = router;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// router.get("/get-all-inventory", protect, async (req, res) => {
+//   try {
+//     let baseQuery = {};
+//     if (req.user.role !== "admin") {
+//       baseQuery.siteId = req.user.site;
+//     }
+
+//     const approvedRequests = await MaterialRequestModel.find({
+//       siteId: baseQuery.siteId || { $exists: true },
+//       status: "approved",
+//     });
+
+
+//     const approvedItemIds = approvedRequests.flatMap((reqDoc) =>
+//       reqDoc.items.map((it) => it._id.toString())
+//     );
+
+//     const query = {
+//       ...baseQuery,
+//       $or: [
+//         // { requestQuantity: 0 },
+//         { itemId: { $in: approvedItemIds } },
+//       ],
+//     };
+
+
+//     const siteInventories = await siteInventoryModel
+//       .find(query)
+//       .populate({
+//         path: "itemId",
+//         select: "itemCode description uom category",
+//       })
+//       .sort({ createdAt: -1 });
+
+//     // Calculate pending quantity for each inventory item
+//     const inventoriesWithPending = siteInventories.map(inventory => {
+//       const pending = Math.max(0, inventory.requestQuantity - inventory.issuedQuantity);
+//       return {
+//         ...inventory.toObject(),
+//         pending: pending
+//       };
+//     });
+
+//     res.status(200).json({
+//       success: true,
+//       data: inventoriesWithPending,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching inventory:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: error.message || "Internal server error",
+//     });
+//   }
+// });
+
+// router.patch("/update/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { itemId, open, inHand, requestQuantity, issuedQuantity, mip, pending } = req.body;
+
+//     const updateFields = {};
+//     if (itemId !== undefined) updateFields.itemId = itemId;
+//     if (open !== undefined) updateFields.open = open;
+//     if (inHand !== undefined) updateFields.inHand = inHand;
+//     if (requestQuantity !== undefined) updateFields.requestQuantity = requestQuantity;
+//     if (issuedQuantity !== undefined) updateFields.issuedQuantity = issuedQuantity;
+//     if (mip !== undefined) updateFields.mip = mip;
+//     if (pending !== undefined) updateFields.pending = pending;
+
+//     const updatedInventory = await InventoryModel.findByIdAndUpdate(
+//       id,
+//       { $set: updateFields },
+//       { new: true, runValidators: true }
+//     ).populate({
+//       path: "itemId",
+//       select: "itemCode description uom category gst",
+//     });
+
+//     if (!updatedInventory) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Inventory record not found",
+//       });
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Inventory updated successfully",
+//       data: updatedInventory,
+//     });
+//   } catch (error) {
+//     res.status(500).json({
+//       success: false,
+//       message: error.message || "Internal server error",
+//     });
+//   }
+// });
+
+// router.delete("/delete/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const deletedInventory = await InventoryModel.findByIdAndDelete(id);
+
+//     if (!deletedInventory) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Inventory record not found",
+//       });
+//     }
+//     res.status(200).json({
+//       success: true,
+//       message: "Inventory record deleted successfully",
+//     });
+//   } catch (error) {
+//     res.status(500).json({
+//       success: false,
+//       message: error.message || "Internal server error",
+//     });
+//   }
+// });
+
+
+

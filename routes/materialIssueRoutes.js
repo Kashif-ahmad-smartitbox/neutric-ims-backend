@@ -6,6 +6,7 @@ const SiteInventoryModel = require("../models/SiteInventory");
 const InventoryModel = require("../models/Inventotry");
 const ItemModel = require("../models/Item");
 const TransferOrderModel = require("../models/TransferOrder");
+const MaterialInward = require("../models/MaterialInward");
 const { protect } = require("../middleware/authMiddleware");
 const SiteModel = require("../models/Site");
 const mongoose = require("mongoose");
@@ -562,13 +563,9 @@ router.get("/get-all-to-be-received", protect, async (req, res) => {
       });
     }
 
-    // Build query based on user role
+    // Build query based on user role - show all material issues regardless of status
     let query = {
-      issuedBy: { $ne: userId },
-      $or: [
-        { "shipmentDetails.status": { $exists: false } },
-        { "shipmentDetails.status": "pending" }
-      ]
+      issuedBy: { $ne: userId }
     };
 
     // For site store incharge, filter by their site
@@ -584,7 +581,7 @@ router.get("/get-all-to-be-received", protect, async (req, res) => {
     }
     // For admin, no site filter (see all sites)
 
-    // Find material issues where status is pending or not set
+    // Find all material issues (regardless of status)
     const materialIssues = await MaterialIssueModel.find(query)
       .populate({
         path: "issuedBy",
@@ -608,43 +605,83 @@ router.get("/get-all-to-be-received", protect, async (req, res) => {
     }
 
     // Prepare response data
-    const responseData = materialIssues
-      .filter(issue => issue.issuedBy?.role === "center store incharge")
-      .map(issue => {
-        const items = issue.items
-          .filter(item => item.item)
-          .map(item => ({
+    const responseData = [];
+    
+    for (const issue of materialIssues) {
+      // Only process issues from center store incharge
+      if (issue.issuedBy?.role !== "center store incharge") {
+        continue;
+      }
+
+      // Get all GRNs for this Material Issue to calculate received quantities
+      const existingGRNs = await MaterialInward.find({ 
+        materialIssueNo: issue.materialIssueNumber,
+        type: "Transferred" 
+      }).lean();
+
+      // Calculate received quantities for each item
+      const receivedQuantities = {};
+      existingGRNs.forEach(grn => {
+        grn.items.forEach(item => {
+          if (!receivedQuantities[item.itemCode]) {
+            receivedQuantities[item.itemCode] = 0;
+          }
+          receivedQuantities[item.itemCode] += item.receiveQty;
+        });
+      });
+
+      // Show all items with complete status information (requested, received, remaining)
+      const allItems = issue.items
+        .filter(item => item.item)
+        .map(item => {
+          const itemCode = item.item.itemCode;
+          const totalReceived = receivedQuantities[itemCode] || 0;
+          const remainingQty = Math.max(0, item.issueQty - totalReceived);
+          
+          return {
             _id: item.item._id,
             itemCode: item.item.itemCode || "Unknown",
             category: item.item.category || "Unknown",
             description: item.item.description || "Unknown",
             uom: item.item.uom || "Unknown",
-            issueQty: item.issueQty || 0,
-          }));
+            requestedQty: item.issueQty || 0,        // Original requested quantity
+            receivedQty: totalReceived,              // How much has been received
+            remainingQty: remainingQty,              // How much is left to be received
+            status: remainingQty > 0 ? "Pending" : "Completed" // Item status
+          };
+        });
 
-        if (items.length === 0) {
-          return null;
+      // Calculate overall material issue status
+      const hasPendingItems = allItems.some(item => item.remainingQty > 0);
+      const overallStatus = hasPendingItems ? "Pending" : "Completed";
+
+      // Always include the material issue with all items and complete status
+      responseData.push({
+        _id: issue._id,
+        type: "Transferred",
+        materialIssueNo: issue.materialIssueNumber || `MI${issue._id.toString().slice(-4)}`,
+        createdAt: issue.createdAt?.toISOString() || new Date().toISOString(),
+        supplier: "Central Warehouse",
+        exitDateTime: issue.shipmentDetails?.dateAndExitTime?.toISOString() || null,
+        status: overallStatus,
+        issuedTo: {
+          _id: issue.issuedTo?._id,
+          siteName: issue.issuedTo?.siteName,
+          address: issue.issuedTo?.address,
+          state: issue.issuedTo?.state,
+          city: issue.issuedTo?.city,
+        },
+        items: allItems,
+        summary: {
+          totalRequested: allItems.reduce((sum, item) => sum + item.requestedQty, 0),
+          totalReceived: allItems.reduce((sum, item) => sum + item.receivedQty, 0),
+          totalRemaining: allItems.reduce((sum, item) => sum + item.remainingQty, 0),
+          itemsCount: allItems.length,
+          pendingItemsCount: allItems.filter(item => item.remainingQty > 0).length,
+          completedItemsCount: allItems.filter(item => item.remainingQty === 0).length
         }
-
-        return {
-          _id: issue._id,
-          type: "Transferred",
-          materialIssueNo: issue.materialIssueNumber || `MI${issue._id.toString().slice(-4)}`,
-          createdAt: issue.createdAt?.toISOString() || new Date().toISOString(),
-          supplier: "Central Warehouse",
-          exitDateTime: issue.shipmentDetails?.dateAndExitTime?.toISOString() || null,
-          status: issue.shipmentDetails?.status || "Pending",
-          issuedTo: {
-            _id: issue.issuedTo?._id,
-            siteName: issue.issuedTo?.siteName,
-            address: issue.issuedTo?.address,
-            state: issue.issuedTo?.state,
-            city: issue.issuedTo?.city,
-          },
-          items,
-        };
-      })
-      .filter(item => item !== null);
+      });
+    }
 
     res.status(200).json({
       success: true,

@@ -84,14 +84,14 @@ router.post("/create", protect, async (req, res) => {
       if (isSiteStoreIncharge) {
         // Site store incharge: subtract from requestQuantity, add to mip
         if(source === "inventory-page"){
-          siteInventoryUpdate.$inc.requestQuantity = -requestedQty;
+          // siteInventoryUpdate.$inc.requestQuantity = -requestedQty;
           siteInventoryUpdate.$inc.mip = requestedQty;
         }else{
           siteInventoryUpdate.$inc.mip = requestedQty;
         }
       } else if (isCenterStoreIncharge) {
         // Center store incharge: subtract from existing mip quantities
-        siteInventoryUpdate.$inc.requestQuantity = -requestedQty;
+        // siteInventoryUpdate.$inc.requestQuantity = -requestedQty;
         siteInventoryUpdate.$inc.mip = requestedQty;
         console.log('Center Store Incharge - SiteInventory Update:', { itemId, requestedQty, siteId, update: siteInventoryUpdate });
         // Note: The new request will have its own mip quantities that will be handled when approved
@@ -121,7 +121,7 @@ router.post("/create", protect, async (req, res) => {
       if (isSiteStoreIncharge) {
         // Site store incharge: subtract from requestQuantity, add to mip
         if(source === "inventory-page"){
-          inventoryUpdate.$inc.requestQuantity = -requestedQty;
+          // inventoryUpdate.$inc.requestQuantity = -requestedQty;
           inventoryUpdate.$inc.mip = requestedQty;
         }else{
           inventoryUpdate.$inc.mip = requestedQty;
@@ -129,7 +129,7 @@ router.post("/create", protect, async (req, res) => {
         
       } else if (isCenterStoreIncharge) {
         // Center store incharge: subtract from existing mip quantities
-        inventoryUpdate.$inc.requestQuantity = -requestedQty;
+        // inventoryUpdate.$inc.requestQuantity = -requestedQty;
         inventoryUpdate.$inc.mip = requestedQty;
         console.log('Center Store Incharge - Main Inventory Update:', { itemId, requestedQty, update: inventoryUpdate });
         // Note: The new request will have its own mip quantities that will be handled when approved
